@@ -18,6 +18,7 @@
 package io.github.dan2097.jnainchi;
 
 import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,19 +37,19 @@ import io.github.dan2097.jnainchi.inchi.InchiLibrary.IXA_INCHIBUILDER_STEREOOPTI
 /**
  * This class interacts with c or WASM native code to access the InChI Extended
  * Application Programming Interface. It utilizes INCHI_API libinchi/IXA_*
- * methods exclusively. It works for both WASM for JavaScript and for JNA for
- * Java with almost no changes in the code. (Look for references to the field
- * "isJS".
+ * methods along with selected "JavaScript-safe" functions within inchi C. It
+ * works for both WASM for JavaScript and for JNA for Java with almost no
+ * changes in the code. (Look for references to the field "isJS".
  * <p>
- * It does not have to interpret architecture-specific alignments of structures
- * because all of the returned values from these c functions are numbers or
- * strings. All of the objects of inchi c -- molecules, atoms, bonds,
- * stereocenter metadata, builders, etc. -- are returned only as shared memory
- * address pointers. These are Pointer objects that hold a single int value in
- * Java and just simple int32 in JavaScript. (The Pointer parameters and return
- * values in the native calls of InchiLibrary are taken care of by the
- * java2script transpiler, converting them to and from the int JavaScript
- * values.)
+ * This implementation does not have to interpret architecture-specific
+ * alignments of structures because all of the returned values from these c
+ * functions are numbers or strings. All of the objects of inchi c -- molecules,
+ * atoms, bonds, stereocenter metadata, builders, etc. -- are returned only as
+ * shared memory address pointers. These are Pointer objects that hold a single
+ * int value in Java and just simple int32 in JavaScript. (The Pointer
+ * parameters and return values in the native calls of InchiLibrary are taken
+ * care of by the java2script transpiler, converting them to and from the int
+ * JavaScript values.)
  * <p>
  * JNA-InChI's JnaInchi and InchiFunctions java classes both add another layer
  * of Pointer subclasses that allows distinguishing these pointers from one
@@ -76,16 +77,23 @@ import io.github.dan2097.jnainchi.inchi.InchiLibrary.IXA_INCHIBUILDER_STEREOOPTI
  * Java or JavaScript. If you want to see how involved this is, take a peek at
  * com.sun.jna.Structure.java .)
  * <p>
- * The following libinchi methods, which don't start with "IXA_", are not part
- * of this package:
+ * The following libinchi methods that don't start with "IXA_" but are still
+ * part of this package because they are JavaScript-safe include:
+ * 
+ * <pre>
+ InchiLibrary.CheckINCHI
+ InchiLibrary.CheckINCHIKey
+ InchiLibrary.GetINCHIKeyFromINCHI
+ * </pre>
+ * 
+ * The following libinchi methods are not part of this package:
  * 
  * <pre>
 Free_inchi_Input
 Free_std_inchi_Input
 Get_inchi_Input_FromAuxInfo
 Get_std_inchi_Input_FromAuxInfo
-GetINCHIfromINCHI
-GetINCHIKeyFromINCHI
+GetINCHIfromINCHI  (replaced with IXA_MOL_ReadInChI)
 GetStdINCHIKeyFromStdINCHI
 INCHIGEN_Create
 INCHIGEN_Destroy
@@ -94,7 +102,7 @@ INCHIGEN_DoNormalization
 INCHIGEN_DoSerialization
 INCHIGEN_Reset
 INCHIGEN_Setup
-MakeINCHIFromMolfileText
+MakeINCHIFromMolfileText (replaced with IXA.IXA_MOL_ReadMolfile)
 STDINCHIGEN_Create
 STDINCHIGEN_Destroy
 STDINCHIGEN_DoCanonicalization
@@ -106,20 +114,8 @@ STDINCHIGEN_Setup
  * 
  * The development of this class was a day's exercise. An experiment to see if
  * we really could have a common interface for Java and JavaScript. In the end,
- * there were just two hitches - see TODO notes:
- * 
- * 1) InchiToInchiKey works fine using IXA_INCHIKEYBUILDER_GetInChIKey(), but
- * that method does not provide detailed error return data or szXtra1 or szXtra2
- * returns. It would not be impossible to do this since we could imagine having
- * that return be part of the a method such as
- * 
- * IXA_INCHIKEYBUILDER.getErrorReturn(...)
- * 
- * IXA_INCHIKEYBUILDER.getExtra1(...)
- * 
- * IXA_INCHIKEYBUILDER.getExtra2(...)
- * 
- * 2) Currently there is no IXA access to (ichilnct.c) Get_inchi_Input_FromAuxInfo. 
+ * there were just one hitch. Currently there is no IXA access to (ichilnct.c)
+ * Get_inchi_Input_FromAuxInfo. It would be good to have an IXA interface to this method.
  * 
  * The source is based on jnainchi.java, by Daniel Lowe.
  * 
@@ -682,11 +678,12 @@ public class InchiAPI {
 	public static InchiOutput molToInchi(String molText, InchiOptions options) {
 		checkLibrary();
 		Pointer hStatus = IXA.IXA_STATUS_Create();
-		Pointer nativeMol = IXA.IXA_MOL_Create(hStatus);
+		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);		
+		IXA.IXA_MOL_ReadMolfile(hStatus, hMolecule, molText);
 		if (IXA.IXA_STATUS_HasError(hStatus)) {
 			return new InchiOutput("", "", getMessages(hStatus), "", InchiStatus.ERROR);
 		}
-		return buildInchi(hStatus, nativeMol, options);
+		return buildInchi(hStatus, hMolecule, options);
 	}
 
 	/**
@@ -711,39 +708,64 @@ public class InchiAPI {
 		}
 	}
 
-	public static InchiKeyOutput inchiToInchiKey(String inchi) {
-		// not implemented in CDK
-		// TODO no return for error here other than a null value
-		// and no extra fields are available
+	/**
+	 * Generate an InChIKey from an InChI, with no option to return hash codes.
+	 * 
+	 * @param inchi
+	 * @return
+	 */
+	public static InchiKeyOutput inchiToInchiKeyIXA(String inchi) {
 		checkLibrary();
 		Pointer hStatus = IXA.IXA_STATUS_Create();
 		Pointer hBuilder = IXA.IXA_INCHIKEYBUILDER_Create(hStatus);
 		try {
 			IXA.IXA_INCHIKEYBUILDER_SetInChI(hStatus, hBuilder, inchi);
 			String key = IXA.IXA_INCHIKEYBUILDER_GetInChIKey(hStatus, hBuilder);
-			return new InchiKeyOutput(key, InchiKeyStatus.of((byte)0), "", "");
+			int ret = (key == null ? InchiLibrary.INCHIKEY_UNKNOWN_ERROR 
+					: InchiLibrary.INCHIKEY_OK);
+			return new InchiKeyOutput(key, InchiKeyStatus.of((byte)ret), "", "");
 		} finally {
 			IXA.IXA_STATUS_Destroy(hStatus);
 			IXA.IXA_INCHIBUILDER_Destroy(null, hBuilder);
 		}
-
-//    byte[] inchiKeyBytes = new byte[28];
-//    byte[] szXtra1Bytes = new byte[65];
-//    byte[] szXtra2Bytes = new byte[65];
-//    int libret = InchiLibrary.GetINCHIKeyFromINCHI(inchi, 1, 1, inchiKeyBytes, szXtra1Bytes, szXtra2Bytes);
-//    InchiKeyStatus ret = InchiKeyStatus.of(libret);
-//    String inchiKeyStr = new String(inchiKeyBytes, StandardCharsets.UTF_8).trim();
-//    String szXtra1 = new String(szXtra1Bytes, StandardCharsets.UTF_8).trim();
-//    String szXtra2 = new String(szXtra2Bytes, StandardCharsets.UTF_8).trim();
-//    return new InchiKeyOutput(inchiKeyStr, ret, szXtra1, szXtra2);
 	}
 
+	/**
+	 * Generate an 27-byte InChIKey from an InChI along with 64-byte hash codes and detailed error message.
+	 * 
+	 * JavaScript-safe even though not IXA
+	 * 
+	 * @param inchi
+	 * @return InchiKeyOutput object
+	 */
+	  public static InchiKeyOutput inchiToInchiKey(String inchi) {
+		    checkLibrary();
+		    byte[] inchiKeyBytes = new byte[28];
+		    byte[] szXtra1Bytes = new byte[65];
+		    byte[] szXtra2Bytes = new byte[65];
+		    InchiKeyStatus ret = InchiKeyStatus.of(InchiLibrary.GetINCHIKeyFromINCHI(inchi, 1, 1, inchiKeyBytes, szXtra1Bytes, szXtra2Bytes));
+			try {
+			    String inchiKeyStr = new String(inchiKeyBytes, "UTF-8").trim();
+			    String szXtra1 = new String(szXtra1Bytes, "UTF-8").trim();
+			    String szXtra2 = new String(szXtra2Bytes, "UTF-8").trim();
+			    return new InchiKeyOutput(inchiKeyStr, ret, szXtra1, szXtra2);
+			} catch (UnsupportedEncodingException e) {
+				// n/a just using UTF-8 here because it avoids unnecessary class loading in JavaScript
+				return null;
+			}
+		  }
+
 	  /**
-	   * Check if the string represents a valid InChI/StdInChI
-	   * If strict is true, try to perform InChI2InChI conversion; returns success if a resulting InChI string exactly matches source.
-	   * Be cautious: the result may be too strict, i.e. a 'false alarm', due to imperfection of conversion.
+	 * Check if the string represents a valid InChI/StdInChI If strict is true, try
+	 * to perform InChI2InChI conversion; returns success if a resulting InChI
+	 * string exactly matches source. Be cautious: the result may be too strict,
+	 * i.e. a 'false alarm', due to imperfection of conversion.
+	 * 
+	 * JavaScript-safe even though not IXA
+	 * 
 	   * @param inchi
-	   * @param strict if false, just briefly check for proper layout (prefix, version, etc.)
+	 * @param strict if false, just briefly check for proper layout (prefix,
+	 *               version, etc.)
 	   * @return InchiCheckStatus
 	   */
 	  public static InchiCheckStatus checkInchi(String inchi, boolean strict) {
@@ -753,6 +775,9 @@ public class InchiAPI {
 	  
 	  /**
 	   * Check if the string represents valid InChIKey
+	   * 
+	   * JavaScript-safe even though not IXA
+	   * 
 	   * @param inchiKey
 	   * @return InchiKeyCheckStatus
 	   */
@@ -776,9 +801,10 @@ public class InchiAPI {
 	 */
 	public static InchiInputFromAuxinfoOutput getInchiInputFromAuxInfo(String auxInfo, boolean doNotAddH,
 			boolean diffUnkUndfStereo) {
+	    checkLibrary();
 		// not implemented in CDK
 		// TODO
-		// there is no IXA access to ichilnct.c
+		// there is currently no IXA access to ichilnct.c
 		// Get_inchi_Input_FromAuxInfo( szInchiAuxInfo, bDoNotAddH, bDiffUnkUndfStereo,
 		// pInchiInp )
 		InchiInput inchiInput = new InchiInput();
@@ -788,7 +814,7 @@ public class InchiAPI {
 		return new InchiInputFromAuxinfoOutput(inchiInput, chiralFlag, message, status);
 	}
 
-	// TODO InchiLibrary.Get_inchi_Input_FromAuxInfo
+//	// TODO InchiLibrary.Get_inchi_Input_FromAuxInfo
 //  private static InchiStatus getInchiStatus(int ret) {
 //    switch (ret) {
 //    case tagRetValGetINCHI.inchi_Ret_OKAY:/* Success; no errors or warnings*/
@@ -971,6 +997,14 @@ public class InchiAPI {
 	 * @return Version number String
 	 */
 	public static String getInchiLibraryVersion() {
+		/**
+		 * needs implementation
+		 * 
+		 * @j2sNative
+		 * 
+		 * return null;
+		 * 
+		 */
 		try (InputStream is = JnaInchi.class.getResourceAsStream("jnainchi_build.props")) {
 			Properties props = new Properties();
 			props.load(is);
@@ -986,6 +1020,11 @@ public class InchiAPI {
 	 * @return Version number String
 	 */
 	public static String getJnaInchiVersion() {
+		/**
+		 * not implemented;
+		 * 
+		 * @j2sNative
+		 */
 		try (InputStream is = JnaInchi.class.getResourceAsStream("jnainchi_build.props")) {
 			Properties props = new Properties();
 			props.load(is);
