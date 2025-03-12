@@ -42,12 +42,23 @@ public enum InchiRadical {
     return code;
   }
   
-  private static final Map<Byte, InchiRadical> map = new HashMap<>();
+  private static final Map<Object, InchiRadical> map = new HashMap<>();
   
   static {
     for (InchiRadical val : InchiRadical.values()) {
-      map.put(val.code, val);
+      map.put(Byte.valueOf(val.code), val);
+      map.put(val.name().toLowerCase(), val);
     }
+  }
+
+  public static int getCodeObj(Object val) {
+    if (val != null) {
+      InchiRadical e = (val instanceof InchiRadical ? (InchiRadical) val 
+          : map.get(val.toString().toLowerCase()));
+      if (e != null)
+        return e.getCode();
+    }
+    return NONE.getCode();
   }
   
   static InchiRadical of(byte code) {

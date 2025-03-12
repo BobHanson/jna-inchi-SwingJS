@@ -45,14 +45,25 @@ public enum InchiBondType {
     return code;
   }
   
-  private static final Map<Byte, InchiBondType> map = new HashMap<>();
+  private static final Map<Object, InchiBondType> map = new HashMap<>();
   
   static {
     for (InchiBondType val : InchiBondType.values()) {
-      map.put(val.code, val);
+      map.put(Byte.valueOf(val.code), val);
+      map.put(val.name().toLowerCase(), val);
     }
   }
-  
+
+  public static int getCodeObj(Object val) {
+    if (val != null) {
+      InchiBondType e = (val instanceof InchiBondType ? (InchiBondType) val 
+          : map.get(val.toString().toLowerCase()));
+      if (e != null)
+        return e.getCode();
+    }
+    return SINGLE.getCode();
+  }
+
   public static InchiBondType of(byte code) {
     return map.get(code);
   }

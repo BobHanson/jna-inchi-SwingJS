@@ -42,14 +42,25 @@ public enum InchiStereoType {
     return code;
   }
   
-  private static final Map<Byte, InchiStereoType> map = new HashMap<>();
+  private static final Map<Object, InchiStereoType> map = new HashMap<>();
   
   static {
     for (InchiStereoType val : InchiStereoType.values()) {
-      map.put(val.code, val);
+      map.put(Byte.valueOf(val.code), val);
+      map.put(val.name().toLowerCase(), val);
     }
   }
   
+  public static int getCodeObj(Object val) {
+    if (val != null) {
+      InchiStereoType e = (val instanceof InchiStereoType ? (InchiStereoType) val 
+          : map.get(val.toString().toLowerCase()));
+      if (e != null)
+        return e.getCode();
+    }
+    return None.getCode();
+  }
+
   static InchiStereoType of(byte code) {
     return map.get(code);
   }

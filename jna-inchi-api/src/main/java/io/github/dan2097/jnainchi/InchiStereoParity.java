@@ -44,14 +44,25 @@ public enum InchiStereoParity {
     return code;
   }
   
-  private static final Map<Byte, InchiStereoParity> map = new HashMap<>();
+  private static final Map<Object, InchiStereoParity> map = new HashMap<>();
   
   static {
     for (InchiStereoParity val : InchiStereoParity.values()) {
-      map.put(val.code, val);
+      map.put(Byte.valueOf(val.code), val);
+      map.put(val.name().toLowerCase(), val);
     }
   }
   
+  public static int getCodeObj(Object val) {
+    if (val != null) {
+      InchiStereoParity e = (val instanceof InchiStereoParity ? (InchiStereoParity) val 
+          : map.get(val.toString().toLowerCase()));
+      if (e != null)
+        return e.getCode();
+    }
+    return NONE.getCode();
+  }
+    
   static InchiStereoParity of(byte code) {
     return map.get(code);
   }

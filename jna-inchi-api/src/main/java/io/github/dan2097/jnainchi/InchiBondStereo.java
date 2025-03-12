@@ -58,12 +58,23 @@ public enum InchiBondStereo {
     return code;
   }
   
-  private static final Map<Byte, InchiBondStereo> map = new HashMap<>();
+  private static final Map<Object, InchiBondStereo> map = new HashMap<>();
   
   static {
     for (InchiBondStereo val : InchiBondStereo.values()) {
-      map.put(val.code, val);
+      map.put(Byte.valueOf(val.code), val);
+      map.put(val.name().toLowerCase(), val);
     }
+  }
+    
+  public static int getCodeObj(Object val) {
+    if (val != null) {
+      InchiBondStereo e = (val instanceof InchiBondStereo ? (InchiBondStereo) val 
+          : map.get(val.toString().toLowerCase()));
+      if (e != null)
+        return e.getCode();
+    }
+    return NONE.getCode();
   }
   
   static InchiBondStereo of(byte code) {
