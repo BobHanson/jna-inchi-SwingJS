@@ -128,10 +128,11 @@ public class InchiAPI {
 	private static boolean isJS = (/** @j2sNative true || */
 	false);
 	private static Throwable libraryLoadingError = null;
+	private static String inchiLibName;
 	static {
 		try {
 			// trigger a static load of InchiLibrary
-			InchiLibrary.JNA_NATIVE_LIB.getName();
+			inchiLibName = InchiLibrary.JNA_NATIVE_LIB.getName();
 		} catch (Throwable e) {
 			e.printStackTrace();
 			libraryLoadingError = e;
@@ -143,11 +144,17 @@ public class InchiAPI {
 	 * 
 	 * For Java, just run the Runnable.
 	 * 
+	 * This JavaScript implementation requires SwingjS.
+	 * 
 	 * @param r The runnable to run when ready, in Java or JavaScript.
 	 * 
 	 */
 	public static void initAndRun(Runnable r) {
+		@SuppressWarnings("unused")
+		String wasmName = inchiLibName;
 		/**
+		 * In JavaScript, we wait for the WASM module to load.
+		 * 
 		 * @j2sNative
 		 *    
 		 *    if (!J2S) {
@@ -157,7 +164,7 @@ public class InchiAPI {
 		 *   var t = [];
 		 *   t[0] = setInterval(
 		 *      function(){
-		 *       if (J2S.inchiWasmLoaded) {
+		 *       if (J2S.wasm[wasmName]) {
 		 *        clearInterval(t[0]);
 		 *        System.out.println("InChI WASM initialized successfully");
 		 *        r.run$();
@@ -165,6 +172,7 @@ public class InchiAPI {
 		 *        System.out.println("InChI WASM initializing...");
 		 *      }, 50);
 		 */ {
+			 // in Java, no asynchronous issue
 			 r.run();
 		 }
 	}
@@ -738,24 +746,24 @@ public class InchiAPI {
 	 * @param inchi
 	 * @return InchiKeyOutput object
 	 */
-	  public static InchiKeyOutput inchiToInchiKey(String inchi) {
-		    checkLibrary();
-		    byte[] inchiKeyBytes = new byte[28];
-		    byte[] szXtra1Bytes = new byte[65];
-		    byte[] szXtra2Bytes = new byte[65];
-		    InchiKeyStatus ret = InchiKeyStatus.of(InchiLibrary.GetINCHIKeyFromINCHI(inchi, 1, 1, inchiKeyBytes, szXtra1Bytes, szXtra2Bytes));
-			try {
-			    String inchiKeyStr = new String(inchiKeyBytes, "UTF-8").trim();
-			    String szXtra1 = new String(szXtra1Bytes, "UTF-8").trim();
-			    String szXtra2 = new String(szXtra2Bytes, "UTF-8").trim();
-			    return new InchiKeyOutput(inchiKeyStr, ret, szXtra1, szXtra2);
-			} catch (UnsupportedEncodingException e) {
-				// n/a just using UTF-8 here because it avoids unnecessary class loading in JavaScript
-				return null;
-			}
-		  }
+	public static InchiKeyOutput inchiToInchiKey(String inchi) {
+	    checkLibrary();
+	    byte[] inchiKeyBytes = new byte[28];
+	    byte[] szXtra1Bytes = new byte[65];
+	    byte[] szXtra2Bytes = new byte[65];
+	    InchiKeyStatus ret = InchiKeyStatus.of(InchiLibrary.GetINCHIKeyFromINCHI(inchi, 1, 1, inchiKeyBytes, szXtra1Bytes, szXtra2Bytes));
+		try {
+		    String inchiKeyStr = new String(inchiKeyBytes, "UTF-8").trim();
+		    String szXtra1 = new String(szXtra1Bytes, "UTF-8").trim();
+		    String szXtra2 = new String(szXtra2Bytes, "UTF-8").trim();
+		    return new InchiKeyOutput(inchiKeyStr, ret, szXtra1, szXtra2);
+		} catch (UnsupportedEncodingException e) {
+			// n/a just using UTF-8 here because it avoids unnecessary class loading in JavaScript
+			return null;
+		}
+	}
 
-	  /**
+	/**
 	 * Check if the string represents a valid InChI/StdInChI If strict is true, try
 	 * to perform InChI2InChI conversion; returns success if a resulting InChI
 	 * string exactly matches source. Be cautious: the result may be too strict,
@@ -763,24 +771,24 @@ public class InchiAPI {
 	 * 
 	 * JavaScript-safe even though not IXA
 	 * 
-	   * @param inchi
+	 * @param inchi
 	 * @param strict if false, just briefly check for proper layout (prefix,
 	 *               version, etc.)
-	   * @return InchiCheckStatus
-	   */
+	 * @return InchiCheckStatus
+	 */
 	  public static InchiCheckStatus checkInchi(String inchi, boolean strict) {
 	    checkLibrary();
 	    return InchiCheckStatus.of(InchiLibrary.CheckINCHI(inchi, strict));
 	  }
 	  
-	  /**
-	   * Check if the string represents valid InChIKey
-	   * 
-	   * JavaScript-safe even though not IXA
-	   * 
-	   * @param inchiKey
-	   * @return InchiKeyCheckStatus
-	   */
+	/**
+	 * Check if the string represents valid InChIKey
+	 * 
+	 * JavaScript-safe even though not IXA
+	 * 
+	 * @param inchiKey
+	 * @return InchiKeyCheckStatus
+	 */
 	  public static InchiKeyCheckStatus checkInchiKey(String inchiKey) {
 	    checkLibrary();
 	    return InchiKeyCheckStatus.of(InchiLibrary.CheckINCHIKey(inchiKey));
