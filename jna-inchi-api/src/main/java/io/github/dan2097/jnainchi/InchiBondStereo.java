@@ -18,6 +18,7 @@
 package io.github.dan2097.jnainchi;
 
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import io.github.dan2097.jnainchi.inchi.InchiLibrary.tagINCHIBondStereo2D;
@@ -63,14 +64,14 @@ public enum InchiBondStereo {
   static {
     for (InchiBondStereo val : InchiBondStereo.values()) {
       map.put(Byte.valueOf(val.code), val);
-      map.put(val.name().toLowerCase(), val);
+      map.put(val.name().toLowerCase(Locale.ROOT), val);
     }
   }
     
   public static int getCodeObj(Object val) {
     if (val != null) {
       InchiBondStereo e = (val instanceof InchiBondStereo ? (InchiBondStereo) val 
-          : map.get(val.toString().toLowerCase()));
+          : map.get(val.toString().toLowerCase(Locale.ROOT)));
       if (e != null)
         return e.getCode();
     }
