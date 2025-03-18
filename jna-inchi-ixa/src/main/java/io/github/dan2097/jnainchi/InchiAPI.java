@@ -673,7 +673,22 @@ public class InchiAPI {
 	}
 
 	public static InchiOutput molToInchi(String molText) {
-		return molToInchi(molText, InchiOptions.DEFAULT_OPTIONS);
+		return molFileToInchi(molText, InchiOptions.DEFAULT_OPTIONS);
+	}
+
+	/**
+	 * Generate an InChI from a MOL file as input.
+	 * 
+	 * For compatibility with JnaInchi. Deprecated only because of its ambiguous
+	 * name; Replacement is molFileToInch(String molText).
+	 * 
+	 * @param molText molfile text
+	 * @param options
+	 * @return
+	 */
+	@Deprecated
+	public static InchiOutput molToInchi(String molText, InchiOptions options) {
+		return molFileToInchi(molText, options);
 	}
 
 	/**
@@ -683,7 +698,7 @@ public class InchiAPI {
 	 * @param options
 	 * @return
 	 */
-	public static InchiOutput molToInchi(String molText, InchiOptions options) {
+	public static InchiOutput molFileToInchi(String molText, InchiOptions options) {
 		checkLibrary();
 		Pointer hStatus = IXA.IXA_STATUS_Create();
 		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);		
