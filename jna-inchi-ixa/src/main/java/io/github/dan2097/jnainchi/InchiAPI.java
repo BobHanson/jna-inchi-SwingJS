@@ -19,10 +19,14 @@ package io.github.dan2097.jnainchi;
 
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 
 import com.sun.jna.Platform;
 import com.sun.jna.Pointer;
@@ -122,7 +126,6 @@ STDINCHIGEN_Setup
  * @author Bob Hanson
  *
  */
-@SuppressWarnings("boxing")
 public class InchiAPI {
 
 	private static boolean isJS = (/** @j2sNative true || */
@@ -153,24 +156,27 @@ public class InchiAPI {
 		@SuppressWarnings("unused")
 		String wasmName = inchiLibName;
 		/**
-		 * In JavaScript, we wait for the WASM module to load.
+		 * In JavaScript, we wait for Clazz._loadWasm to complete its task.
+		 * This is indicated by J2S[wasmName].$ready = true
 		 * 
 		 * @j2sNative
-		 *    
-		 *    if (!J2S) {
-		 *      alert("J2S has not been installed");
-		 *      System.exit(0);
-		 *    }
-		 *   var t = [];
-		 *   t[0] = setInterval(
-		 *      function(){
-		 *       if (J2S.wasm[wasmName]) {
-		 *        clearInterval(t[0]);
-		 *        System.out.println("InChI WASM initialized successfully");
-		 *        r.run$();
-		 *       }
-		 *        System.out.println("InChI WASM initializing...");
-		 *      }, 50);
+		 * 
+  if (!J2S) { 
+     alert("J2S has not been installed");
+     System.exit(0);
+  }  
+   var t = [];
+   var f = function(){ 
+       if (J2S.wasm && J2S.wasm[wasmName] && J2S.wasm[wasmName].$ready) {
+         t[0] && clearInterval(t[0]);
+         System.out.println("InChI WASM initialized successfully");
+         r.run$();
+         return true;
+       } 
+       System.out.println("InChI WASM initializing...");
+   }; 
+   if (f()) { return;} 
+   t[0] = setInterval(f, 50);
 		 */ {
 			 // in Java, no asynchronous issue
 			 r.run();
@@ -336,106 +342,105 @@ public class InchiAPI {
 		if (stereos.size() > Short.MAX_VALUE) {
 			throw new IllegalStateException("Too many stereochemistry elements in input");
 		}
-
 		Pointer hStatus = IXA.IXA_STATUS_Create();
-		Pointer nativeMol = IXA.IXA_MOL_Create(hStatus);
-		IXA.IXA_MOL_ReserveSpace(hStatus, nativeMol, atomCount, bonds.size(), stereos.size());
+		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);
+		IXA.IXA_MOL_ReserveSpace(hStatus, hMolecule, atomCount, bonds.size(), stereos.size());
 		try {
-			Map<InchiAtom, Pointer> atomToNativeAtom = addAtoms(nativeMol, hStatus, atoms);
-			addBonds(nativeMol, hStatus, bonds, atomToNativeAtom);
-			addStereos(nativeMol, hStatus, stereos, atomToNativeAtom);
-			return buildInchi(hStatus, nativeMol, options);
+			Map<InchiAtom, Pointer> atomToNativeAtom = addAtoms(hMolecule, hStatus, atoms);
+			addBonds(hMolecule, hStatus, bonds, atomToNativeAtom);
+			addStereos(hMolecule, hStatus, stereos, atomToNativeAtom);
+			return buildInchi(hStatus, hMolecule, options);
 		} finally {
-			IXA.IXA_MOL_Destroy(hStatus, nativeMol);
+			IXA.IXA_MOL_Destroy(null, hMolecule);
 			IXA.IXA_STATUS_Destroy(hStatus);
 		}
 	}
 
-	private static Map<InchiAtom, Pointer> addAtoms(Pointer mol, Pointer hStatus, List<InchiAtom> atoms) {
+	private static Map<InchiAtom, Pointer> addAtoms(Pointer hMolecule, Pointer hStatus, List<InchiAtom> atoms) {
 		Map<InchiAtom, Pointer> atomToNativeAtom = new HashMap<>();
 		for (InchiAtom atom : atoms) {
 			double v;
 			int iv;
 			String sv;
 			// For performance only call IxaAPI when values differ from the defaults
-			Pointer nativeAtom = IXA.IXA_MOL_CreateAtom(hStatus, mol);
-			atomToNativeAtom.put(atom, nativeAtom);
+			Pointer vAtom = IXA.IXA_MOL_CreateAtom(hStatus, hMolecule);
+			atomToNativeAtom.put(atom, vAtom);
 			if ((v = atom.getX()) != 0) {
-				IXA.IXA_MOL_SetAtomX(hStatus, mol, nativeAtom, v);
+				IXA.IXA_MOL_SetAtomX(hStatus, hMolecule, vAtom, v);
 			}
 			if ((v = atom.getY()) != 0) {
-				IXA.IXA_MOL_SetAtomY(hStatus, mol, nativeAtom, v);
+				IXA.IXA_MOL_SetAtomY(hStatus, hMolecule, vAtom, v);
 			}
 			if ((v = atom.getZ()) != 0) {
-				IXA.IXA_MOL_SetAtomZ(hStatus, mol, nativeAtom, v);
+				IXA.IXA_MOL_SetAtomZ(hStatus, hMolecule, vAtom, v);
 			}
 			if (!(sv = atom.getElName()).equals("C")) {
 				if (sv.length() > 5) {
 					throw new IllegalArgumentException("Element name was too long: " + sv);
 				}
-				IXA.IXA_MOL_SetAtomElement(hStatus, mol, nativeAtom, sv);
+				IXA.IXA_MOL_SetAtomElement(hStatus, hMolecule, vAtom, sv);
 			}
 			if ((iv = atom.getIsotopicMass()) != 0) {
-				IXA.IXA_MOL_SetAtomMass(hStatus, mol, nativeAtom, iv);
+				IXA.IXA_MOL_SetAtomMass(hStatus, hMolecule, vAtom, iv);
 			}
 			if ((iv = atom.getCharge()) != 0) {
-				IXA.IXA_MOL_SetAtomCharge(hStatus, mol, nativeAtom, iv);
+				IXA.IXA_MOL_SetAtomCharge(hStatus, hMolecule, vAtom, iv);
 			}
 			if ((iv = InchiRadical
 					.getCodeObj(atom.getRadical())) != InchiLibrary.IXA_ATOM_RADICAL.IXA_ATOM_RADICAL_NONE) {
-				IXA.IXA_MOL_SetAtomRadical(hStatus, mol, nativeAtom, iv);
+				IXA.IXA_MOL_SetAtomRadical(hStatus, hMolecule, vAtom, iv);
 			}
 			if ((iv = atom.getImplicitHydrogen()) != 0) {
-				IXA.IXA_MOL_SetAtomHydrogens(hStatus, mol, nativeAtom, 0, iv);
+				IXA.IXA_MOL_SetAtomHydrogens(hStatus, hMolecule, vAtom, 0, iv);
 			}
 			if ((iv = atom.getImplicitProtium()) != 0) {
-				IXA.IXA_MOL_SetAtomHydrogens(hStatus, mol, nativeAtom, 1, iv);
+				IXA.IXA_MOL_SetAtomHydrogens(hStatus, hMolecule, vAtom, 1, iv);
 			}
 			if ((iv = atom.getImplicitDeuterium()) != 0) {
-				IXA.IXA_MOL_SetAtomHydrogens(hStatus, mol, nativeAtom, 2, iv);
+				IXA.IXA_MOL_SetAtomHydrogens(hStatus, hMolecule, vAtom, 2, iv);
 			}
 			if ((iv = atom.getImplicitTritium()) != 0) {
-				IXA.IXA_MOL_SetAtomHydrogens(hStatus, mol, nativeAtom, 3, iv);
+				IXA.IXA_MOL_SetAtomHydrogens(hStatus, hMolecule, vAtom, 3, iv);
 			}
 		}
 		return atomToNativeAtom;
 	}
 
-	private static void addBonds(Pointer mol, Pointer hStatus, List<InchiBond> bonds,
+	private static void addBonds(Pointer hMolecule, Pointer hStatus, List<InchiBond> bonds,
 			Map<InchiAtom, Pointer> atomToNativeAtom) {
 		for (InchiBond bond : bonds) {
-			Pointer nativeAtom1 = atomToNativeAtom.get(bond.getStart());
-			Pointer nativeAtom2 = atomToNativeAtom.get(bond.getEnd());
-			if (nativeAtom1 == null || nativeAtom2 == null) {
+			Pointer vAtom1 = atomToNativeAtom.get(bond.getStart());
+			Pointer vAtom2 = atomToNativeAtom.get(bond.getEnd());
+			if (vAtom1 == null || vAtom2 == null) {
 				throw new IllegalStateException("Bond referenced an atom that was not provided");
 			}
-			Pointer nativeBond = IXA.IXA_MOL_CreateBond(hStatus, mol, nativeAtom1, nativeAtom2);
+			Pointer vBond = IXA.IXA_MOL_CreateBond(hStatus, hMolecule, vAtom1, vAtom2);
 			int iv;
 			if ((iv = InchiBondType.getCodeObj(bond.getType())) != InchiLibrary.IXA_BOND_TYPE.IXA_BOND_TYPE_SINGLE) {
-				IXA.IXA_MOL_SetBondType(hStatus, mol, nativeBond, iv);
+				IXA.IXA_MOL_SetBondType(hStatus, hMolecule, vBond, iv);
 			}
 			switch (iv = InchiBondStereo.getCodeObj(bond.getStereo())) {
 			case InchiLibrary.tagINCHIBondStereo2D.INCHI_BOND_STEREO_DOUBLE_EITHER:
 				// Default is to perceive configuration from 2D coordinates
-				IXA.IXA_MOL_SetDblBondConfig(hStatus, mol, nativeBond, IXA_DBLBOND_CONFIG.IXA_DBLBOND_CONFIG_EITHER);
+				IXA.IXA_MOL_SetDblBondConfig(hStatus, hMolecule, vBond, IXA_DBLBOND_CONFIG.IXA_DBLBOND_CONFIG_EITHER);
 				break;
 			case InchiLibrary.tagINCHIBondStereo2D.INCHI_BOND_STEREO_SINGLE_1DOWN:
-				IXA.IXA_MOL_SetBondWedge(hStatus, mol, nativeBond, nativeAtom1, IXA_BOND_WEDGE.IXA_BOND_WEDGE_DOWN);
+				IXA.IXA_MOL_SetBondWedge(hStatus, hMolecule, vBond, vAtom1, IXA_BOND_WEDGE.IXA_BOND_WEDGE_DOWN);
 				break;
 			case InchiLibrary.tagINCHIBondStereo2D.INCHI_BOND_STEREO_SINGLE_1EITHER:
-				IXA.IXA_MOL_SetBondWedge(hStatus, mol, nativeBond, nativeAtom1, IXA_BOND_WEDGE.IXA_BOND_WEDGE_EITHER);
+				IXA.IXA_MOL_SetBondWedge(hStatus, hMolecule, vBond, vAtom1, IXA_BOND_WEDGE.IXA_BOND_WEDGE_EITHER);
 				break;
 			case InchiLibrary.tagINCHIBondStereo2D.INCHI_BOND_STEREO_SINGLE_1UP:
-				IXA.IXA_MOL_SetBondWedge(hStatus, mol, nativeBond, nativeAtom1, IXA_BOND_WEDGE.IXA_BOND_WEDGE_UP);
+				IXA.IXA_MOL_SetBondWedge(hStatus, hMolecule, vBond, vAtom1, IXA_BOND_WEDGE.IXA_BOND_WEDGE_UP);
 				break;
 			case InchiLibrary.tagINCHIBondStereo2D.INCHI_BOND_STEREO_SINGLE_2DOWN:
-				IXA.IXA_MOL_SetBondWedge(hStatus, mol, nativeBond, nativeAtom2, IXA_BOND_WEDGE.IXA_BOND_WEDGE_DOWN);
+				IXA.IXA_MOL_SetBondWedge(hStatus, hMolecule, vBond, vAtom2, IXA_BOND_WEDGE.IXA_BOND_WEDGE_DOWN);
 				break;
 			case InchiLibrary.tagINCHIBondStereo2D.INCHI_BOND_STEREO_SINGLE_2EITHER:
-				IXA.IXA_MOL_SetBondWedge(hStatus, mol, nativeBond, nativeAtom2, IXA_BOND_WEDGE.IXA_BOND_WEDGE_EITHER);
+				IXA.IXA_MOL_SetBondWedge(hStatus, hMolecule, vBond, vAtom2, IXA_BOND_WEDGE.IXA_BOND_WEDGE_EITHER);
 				break;
 			case InchiLibrary.tagINCHIBondStereo2D.INCHI_BOND_STEREO_SINGLE_2UP:
-				IXA.IXA_MOL_SetBondWedge(hStatus, mol, nativeBond, nativeAtom2, IXA_BOND_WEDGE.IXA_BOND_WEDGE_UP);
+				IXA.IXA_MOL_SetBondWedge(hStatus, hMolecule, vBond, vAtom2, IXA_BOND_WEDGE.IXA_BOND_WEDGE_UP);
 				break;
 			default:
 			case InchiLibrary.tagINCHIBondStereo2D.INCHI_BOND_STEREO_NONE:
@@ -444,7 +449,7 @@ public class InchiAPI {
 		}
 	}
 
-	private static void addStereos(Pointer nativeMol, Pointer hStatus, List<InchiStereo> stereos,
+	private static void addStereos(Pointer hMolecule, Pointer hStatus, List<InchiStereo> stereos,
 			Map<InchiAtom, Pointer> atomToNativeAtom) {
 		for (InchiStereo stereo : stereos) {
 			int type = InchiStereoType.getCodeObj(stereo.getType());
@@ -452,191 +457,199 @@ public class InchiAPI {
 				continue;
 			}
 			InchiAtom[] neighbors = stereo.getAtoms();
-			Pointer vertex1 = getStereoVertex(atomToNativeAtom, neighbors[0]);
-			Pointer vertex2 = getStereoVertex(atomToNativeAtom, neighbors[1]);
-			Pointer vertex3 = getStereoVertex(atomToNativeAtom, neighbors[2]);
-			Pointer vertex4 = getStereoVertex(atomToNativeAtom, neighbors[3]);
-
-			Pointer center;
-			Pointer centralAtom;
+			Pointer vVertex1 = getStereoVertex(atomToNativeAtom, neighbors[0]);
+			Pointer vVertex2 = getStereoVertex(atomToNativeAtom, neighbors[1]);
+			Pointer vVertex3 = getStereoVertex(atomToNativeAtom, neighbors[2]);
+			Pointer vVertex4 = getStereoVertex(atomToNativeAtom, neighbors[3]);
+			Pointer vStereo;
+			Pointer vCentralAtom;
 			switch (type) {
 			case InchiLibrary.tagINCHIStereoType0D.INCHI_StereoType_Tetrahedral: {
-				centralAtom = getStereoCentralAtom(stereo, atomToNativeAtom);
-				center = IXA.IXA_MOL_CreateStereoTetrahedron(hStatus, nativeMol, centralAtom, vertex1, vertex2, vertex3,
-						vertex4);
+				vCentralAtom = getStereoCentralAtom(stereo, atomToNativeAtom);
+				vStereo = IXA.IXA_MOL_CreateStereoTetrahedron(hStatus, hMolecule, vCentralAtom, vVertex1, vVertex2, vVertex3,
+						vVertex4);
 				break;
 			}
 			case InchiLibrary.tagINCHIStereoType0D.INCHI_StereoType_Allene: {
-				centralAtom = getStereoCentralAtom(stereo, atomToNativeAtom);
-				center = IXA.IXA_MOL_CreateStereoAntiRectangle(hStatus, nativeMol, centralAtom, vertex1, vertex2,
-						vertex3, vertex4);
+				vCentralAtom = getStereoCentralAtom(stereo, atomToNativeAtom);
+				vStereo = IXA.IXA_MOL_CreateStereoAntiRectangle(hStatus, hMolecule, vCentralAtom, vVertex1, vVertex2,
+						vVertex3, vVertex4);
 				break;
 			}
 			case InchiLibrary.tagINCHIStereoType0D.INCHI_StereoType_DoubleBond: {
-				Pointer centralBond = IXA.IXA_MOL_GetCommonBond(hStatus, nativeMol, vertex2, vertex3);
-				if (centralBond == null) {
+				Pointer vCommonBond = IXA.IXA_MOL_GetCommonBond(hStatus, hMolecule, vVertex2, vVertex3);
+				if (vCommonBond == null) {
 					throw new IllegalStateException("Could not find olefin/cumulene central bond");
 				}
-				// We intentionally pass dummy values for vertex2/vertex3, as the IXA API
-				// doesn't actually need these as long as vertex1 and vertex4 aren't implicit
+				// We intentionally pass dummy values for vVertex2/vVertex3, as the IXA API
+				// doesn't actually need these as long as vVertex1 and vVertex4 aren't implicit
 				// hydrogen
 				// this will be -1 in the case of JavaScript WASM
-				center = IXA.IXA_MOL_CreateStereoRectangle(hStatus, nativeMol, centralBond, vertex1, IXA.ATOM_IMPLICIT_H,
-						IXA.ATOM_IMPLICIT_H, vertex4);
+				vStereo = IXA.IXA_MOL_CreateStereoRectangle(hStatus, hMolecule, vCommonBond, vVertex1, IXA.ATOM_IMPLICIT_H,
+						IXA.ATOM_IMPLICIT_H, vVertex4);
 				break;
 			}
 			default:
 				throw new IllegalStateException("Unexpected InChI stereo type:" + type);
 			}
 			int parity = InchiStereoParity.getCodeObj(stereo.getParity());
-			IXA.IXA_MOL_SetStereoParity(hStatus, nativeMol, center, parity);
+			IXA.IXA_MOL_SetStereoParity(hStatus, hMolecule, vStereo, parity);
 		}
 	}
 
 	private static Pointer getStereoCentralAtom(InchiStereo stereo, Map<InchiAtom, Pointer> atomToNativeAtom)
 			throws IllegalStateException {
 		InchiAtom centralAtom = stereo.getCentralAtom();
-		Pointer nativeCentral = atomToNativeAtom.get(centralAtom);
-		if (nativeCentral == null) {
+		Pointer vCentral = atomToNativeAtom.get(centralAtom);
+		if (vCentral == null) {
 			throw new IllegalStateException("Stereo configuration central atom referenced an atom that does not exist");
 		}
-		return nativeCentral;
+		return vCentral;
 	}
 
 	private static Pointer getStereoVertex(Map<InchiAtom, Pointer> atomToNativeAtom, InchiAtom inchiAtom) {
 		if (InchiStereo.STEREO_IMPLICIT_H == inchiAtom) {
 			return IXA.ATOM_IMPLICIT_H;
 		}
-		Pointer vertex = atomToNativeAtom.get(inchiAtom);
-		if (vertex == null) {
+		Pointer vVertex = atomToNativeAtom.get(inchiAtom);
+		if (vVertex == null) {
 			throw new IllegalStateException("Stereo configuration referenced an atom that does not exist");
 		}
-		return vertex;
+		return vVertex;
 	}
 
-	private static InchiOutput buildInchi(Pointer hStatus, Pointer nativeMol, InchiOptions options) {
-		Pointer builder = IXA.IXA_INCHIBUILDER_Create(hStatus);
+	/**
+	 * Allow creation of InChI from pre-created hMolecule 
+	 * @param hStatus may be null
+	 * @param hMolecule
+	 * @param options optional options; may be null for InchiOptions.DEFAULT_OPTIONS
+	 * @return InchiOutput structure
+	 */
+	public static InchiOutput buildInchi(Pointer hStatus, Pointer hMolecule, InchiOptions options) {
+		if (options == null)
+			options = InchiOptions.DEFAULT_OPTIONS;
+		Pointer hBuilder = IXA.IXA_INCHIBUILDER_Create(hStatus);
 		try {
-			IXA.IXA_INCHIBUILDER_SetMolecule(hStatus, builder, nativeMol);
+			IXA.IXA_INCHIBUILDER_SetMolecule(hStatus, hBuilder, hMolecule);
 
 			long timeoutMilliSecs = options.getTimeoutMilliSeconds();
 			if (timeoutMilliSecs != 0) {
-				IXA.IXA_INCHIBUILDER_SetOption_Timeout_MilliSeconds(hStatus, builder, timeoutMilliSecs);
+				IXA.IXA_INCHIBUILDER_SetOption_Timeout_MilliSeconds(hStatus, hBuilder, timeoutMilliSecs);
 			}
 			for (InchiFlag flag : options.getFlags()) {
 				switch (flag) {
 				case AuxNone:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							InchiLibrary.IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_AuxNone, true);
 					break;
 				case ChiralFlagOFF:
-					IXA.IXA_MOL_SetChiral(hStatus, nativeMol, false);
+					IXA.IXA_MOL_SetChiral(hStatus, hMolecule, false);
 					break;
 				case ChiralFlagON:
-					IXA.IXA_MOL_SetChiral(hStatus, nativeMol, true);
+					IXA.IXA_MOL_SetChiral(hStatus, hMolecule, true);
 					break;
 				case DoNotAddH:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_DoNotAddH, true);
 					break;
 				case FixedH:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_FixedH, true);
 					break;
 				case KET:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder, IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_KET,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder, IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_KET,
 							true);
 					break;
 				case LargeMolecules:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_LargeMolecules, true);
 					break;
 				case NEWPSOFF:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_NewPsOff, true);
 					break;
 				case OneFiveT:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder, IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_15T,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder, IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_15T,
 							true);
 					break;
 				case RecMet:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_RecMet, true);
 					break;
 				case SLUUD:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_SLUUD, true);
 					break;
 				case SNon:
-					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, hBuilder,
 							IXA_INCHIBUILDER_STEREOOPTION.IXA_INCHIBUILDER_STEREOOPTION_SNon);
 					break;
 				case SRac:
-					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, hBuilder,
 							IXA_INCHIBUILDER_STEREOOPTION.IXA_INCHIBUILDER_STEREOOPTION_SRac);
 					break;
 				case SRel:
-					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, hBuilder,
 							IXA_INCHIBUILDER_STEREOOPTION.IXA_INCHIBUILDER_STEREOOPTION_SRel);
 					break;
 				case SUCF:
-					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, hBuilder,
 							IXA_INCHIBUILDER_STEREOOPTION.IXA_INCHIBUILDER_STEREOOPTION_SUCF);
 					break;
 				case SAbs:
-					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption_Stereo(hStatus, hBuilder,
 							IXA_INCHIBUILDER_STEREOOPTION.IXA_INCHIBUILDER_STEREOOPTION_SAbs);
 					break;
 				case SUU:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder, IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_SUU,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder, IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_SUU,
 							true);
 					break;
 				case SaveOpt:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_SaveOpt, true);
 					break;
 				case WarnOnEmptyStructure:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_WarnOnEmptyStructure, true);
 					break;
 				case NoWarnings:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_NoWarnings, true);
 					break;
 				case LooseTSACheck:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_LooseTSACheck, true);
 					break;
 				case Polymers:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_Polymers, true);
 					break;
 				case Polymers105:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_Polymers105, true);
 					break;
 				case FoldCRU:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_FoldCRU, true);
 					break;
 				case NoFrameShift:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_NoFrameShift, true);
 					break;
 				case NoEdits:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_NoEdits, true);
 					break;
 				case NPZz:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_NPZZ, true);
 					break;
 				case SAtZz:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_SATZZ, true);
 					break;
 				case OutErrInChI:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, builder,
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
 							IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_OutErrInChI, true);
 					break;
 				default:
@@ -644,14 +657,14 @@ public class InchiAPI {
 				}
 			}
 
-			String inchi = IXA.IXA_INCHIBUILDER_GetInChI(hStatus, builder);
-			String auxInfo = IXA.IXA_INCHIBUILDER_GetAuxInfo(hStatus, builder);
-			String log = IXA.IXA_INCHIBUILDER_GetLog(hStatus, builder);
+			String inchi = IXA.IXA_INCHIBUILDER_GetInChI(hStatus, hBuilder);
+			String auxInfo = IXA.IXA_INCHIBUILDER_GetAuxInfo(hStatus, hBuilder);
+			String log = IXA.IXA_INCHIBUILDER_GetLog(hStatus, hBuilder);
 			InchiStatus status = getStatus(hStatus);
 			String messages = getMessages(hStatus);
 			return new InchiOutput(inchi, auxInfo, messages, log, status);
 		} finally {
-			IXA.IXA_INCHIBUILDER_Destroy(hStatus, builder);
+			IXA.IXA_INCHIBUILDER_Destroy(hStatus, hBuilder);
 		}
 	}
 
@@ -673,16 +686,13 @@ public class InchiAPI {
 	}
 
 	public static InchiOutput molToInchi(String molText) {
-		return molFileToInchi(molText, InchiOptions.DEFAULT_OPTIONS);
+		return molToInchi(molText, InchiOptions.DEFAULT_OPTIONS);
 	}
 
 	/**
-	 * Generate an InChI from a MOL file as input.
+	 * Generate an InChI from a MOL file as input
 	 * 
-	 * For compatibility with JnaInchi. Deprecated only because of its ambiguous
-	 * name; Replacement is molFileToInch(String molText).
-	 * 
-	 * @param molText molfile text
+	 * @param molText  molfile text
 	 * @param options
 	 * @return
 	 */
@@ -692,7 +702,7 @@ public class InchiAPI {
 	}
 
 	/**
-	 * Generate an InChI from a MOL file as input
+	 * Same as molToInchi, but more appropriate name. 
 	 * 
 	 * @param molText
 	 * @param options
@@ -701,13 +711,37 @@ public class InchiAPI {
 	public static InchiOutput molFileToInchi(String molText, InchiOptions options) {
 		checkLibrary();
 		Pointer hStatus = IXA.IXA_STATUS_Create();
-		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);		
-		IXA.IXA_MOL_ReadMolfile(hStatus, hMolecule, molText);
-		if (IXA.IXA_STATUS_HasError(hStatus)) {
-			return new InchiOutput("", "", getMessages(hStatus), "", InchiStatus.ERROR);
+		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);
+		try {
+			IXA.IXA_MOL_ReadMolfile(hStatus, hMolecule, molText);
+			if (IXA.IXA_STATUS_HasError(hStatus)) {
+				return new InchiOutput("", "", getMessages(hStatus), "", InchiStatus.ERROR);
+			}
+			return buildInchi(hStatus, hMolecule, options);
+		} finally {
+			IXA.IXA_MOL_Destroy(hStatus, hMolecule);
+			IXA.IXA_STATUS_Destroy(hStatus);
 		}
-		return buildInchi(hStatus, hMolecule, options);
 	}
+	
+	public static InchiInput getInchiInputFromMolFile(String molText) {
+		return getInchiInputFromMolFile(molText, null);
+	}
+	
+	public static InchiInput getInchiInputFromMolFile(String molText, String moreOptions) {
+	    checkLibrary();
+		Pointer hStatus = IXA.IXA_STATUS_Create();
+		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);
+		try {
+			IXA.IXA_MOL_ReadMolfile(hStatus, hMolecule, molText);
+			return getInchiInputFromMoleculeHandle(hStatus, hMolecule, moreOptions);
+		} finally {
+			IXA.IXA_MOL_Destroy(hStatus, hMolecule);
+			IXA.IXA_STATUS_Destroy(hStatus);
+		}
+	}
+
+
 
 	/**
 	 * Converts InChI into InChI for validation purposes. It may also be used to
@@ -722,12 +756,13 @@ public class InchiAPI {
 	public static InchiOutput inchiToInchi(String inchi, InchiOptions options) {
 		checkLibrary();
 		Pointer hStatus = IXA.IXA_STATUS_Create();
-		Pointer nativeMol = IXA.IXA_MOL_Create(hStatus);
+		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);
 		try {
-			IXA.IXA_MOL_ReadInChI(hStatus, nativeMol, inchi);
-			return buildInchi(hStatus, nativeMol, options);
+			IXA.IXA_MOL_ReadInChI(hStatus, hMolecule, inchi);
+			return buildInchi(hStatus, hMolecule, options);
 		} finally {
-			IXA.IXA_MOL_Destroy(hStatus, nativeMol);
+			IXA.IXA_MOL_Destroy(hStatus, hMolecule);
+			IXA.IXA_STATUS_Destroy(hStatus);
 		}
 	}
 
@@ -855,12 +890,19 @@ public class InchiAPI {
 //    }
 //  }
 
-
 	public static InchiInputFromInchiOutput getInchiInputFromInchi(String inchi) {
 		return getInchiInputFromInchi(inchi, InchiOptions.DEFAULT_OPTIONS);
 	}
 
+	public static InchiInputFromInchiOutput getInchiInputFromInchi(String inchi, String moreOptions) {
+		return getInchiInputFromInchi(inchi, InchiOptions.DEFAULT_OPTIONS, moreOptions);
+	}
+
 	public static InchiInputFromInchiOutput getInchiInputFromInchi(String inchi, InchiOptions options) {
+		return getInchiInputFromInchi(inchi, options, null);
+	}
+	
+	public static InchiInputFromInchiOutput getInchiInputFromInchi(String inchi, InchiOptions options, String moreOptions) {
 		checkLibrary();
 		Pointer hStatus = IXA.IXA_STATUS_Create();
 		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);
@@ -871,18 +913,13 @@ public class InchiAPI {
 			// output));
 			// but here we call IXA_MOL_ReadInChI, which just sets options to ""
 			IXA.IXA_MOL_ReadInChI(hStatus, hMolecule, inchi);
-			InchiInput inchiInput = new InchiInput();
-			Map<Pointer, InchiAtom> mapNativeToJavaAtom = new HashMap<>();
-			nativeToJavaAtoms(hStatus, hMolecule, mapNativeToJavaAtom, inchiInput);
-			nativeToJavaBonds(hStatus, hMolecule, mapNativeToJavaAtom, inchiInput);
-			nativeToJavaStereos(hStatus, hMolecule, mapNativeToJavaAtom, inchiInput);
-
+			InchiInput inchiInput = getInchiInputFromMoleculeHandle(hStatus, hMolecule, moreOptions);
 			String message = getMessages(hStatus);
 			// getStructureFromINCHI generates an output
 			// but IXA_MOL_ReadInChI ignores output.WarningFlags.
 			// and output.szLog. Perhaps these could be rolled into the message,
 			// but probably we could do without them.
-//            String log = output.szLog;
+//	        String log = output.szLog;
 //		      NativeLong[] nativeFlags = output.WarningFlags;//This is a flattened multi-dimensional array, unflatten as we convert
 			// convert
 			String log = "";
@@ -907,6 +944,7 @@ public class InchiAPI {
 //				}
 //			}
 			return new InchiInputFromInchiOutput(inchiInput, message, log, getStatus(hStatus), warningFlags);
+
 		} catch(Throwable t) {
 			System.err.println(t);
 			return null;
@@ -916,8 +954,125 @@ public class InchiAPI {
 		}
 	}
 
+	private static class Amide {
+		InchiAtom aN, aC, aO;
+		InchiBond bNC, bCO;
+		Pointer hNC;
+		int iNC, iCO;
+		boolean revNC, revCO;
+		
+		Amide(Pointer ptr, int index, InchiBond b, InchiAtom a1, InchiAtom a2, boolean isRev) {
+			if (ptr == null) {
+				aC = a1;
+				aO = a2;
+				bCO = b;
+				iCO = index;
+				revCO = isRev;
+			} else {
+			    hNC = ptr;
+				aN = a1;
+				aC = a2;
+				bNC = b;
+				iNC = index;
+				revNC = isRev;
+			}
+		}
+
+		static InchiBond check(int i, Pointer hBond, InchiBond b, List<InchiBond> bonds, 
+				InchiAtom atom1, InchiAtom atom2,
+				Map<InchiAtom, Amide> mapNC, Map<InchiAtom, Amide> mapCO, Set<InchiAtom> setO, Set<Pointer> setNoStereo) {
+			String n1 = atom1.getElName();
+			String n2 = atom2.getElName();
+			if (b.getType() == InchiBondType.DOUBLE) {
+				if (n1.equals("N") && n2.equals("C")) {
+					Amide a = mapCO.get(atom2);						
+					if (a == null) {
+						mapNC.put(atom2, new Amide(hBond, i, b, atom1, atom2, false));
+					} else {
+						setNoStereo.add(hBond);
+						b = a.addN(b, atom1, bonds);
+					}
+				} else if(n2.equals("N") && n1.equals("C")) {
+					Amide a = mapCO.get(atom1);						
+					if (a == null) {
+						mapNC.put(atom1, new Amide(hBond, i, b, atom2, atom1, true));
+					} else {
+						b = a.addN(b, atom1, bonds);
+						setNoStereo.add(hBond);
+					}
+				}
+			} else if (b.getType() == InchiBondType.SINGLE) {
+				if (n1.equals("C") && n2.equals("O") && setO.contains(atom2)) {
+					Amide a = mapNC.get(atom1);						
+					if (a == null) {
+						mapCO.put(atom1, new Amide(null, i, b, atom1, atom2, false));
+					} else {
+						b = a.addO(b, atom2, bonds);
+					}
+				} else if(n2.equals("C") && n1.equals("O") && setO.contains(atom1)) {
+					Amide a = mapNC.get(atom2);						
+					if (a == null) {
+						mapCO.put(atom1, new Amide(null, i, b, atom2, atom1, true));
+					} else {
+						setNoStereo.add(a.hNC);
+						b = a.addO(b, atom1, bonds);
+					}
+				}					
+			}
+			return b;
+		}
+
+		private InchiBond addN(InchiBond b, InchiAtom n, List<InchiBond> bonds) {
+			bNC = b;
+			aN = n;
+			fix();
+			bonds.set(iCO, bCO);
+			return bNC;
+		}
+		
+		private InchiBond addO(InchiBond b, InchiAtom o, List<InchiBond> bonds) {
+			bCO = b;
+			aO = o;
+			fix();
+			bonds.set(iNC, bNC);
+			return bCO;
+		}
+
+		private void fix() {
+			bNC = new InchiBond(revNC ? aC : aN, revNC ? aN : aC, InchiBondType.SINGLE);
+			bCO = new InchiBond(revCO ? aO : aC, revCO ? aC : aO, InchiBondType.DOUBLE);
+			aN.setImplicitHydrogen(aN.getImplicitHydrogen() + 1);
+			aO.setImplicitHydrogen(0);
+		}
+
+	}
+	
+	public static InchiInput getInchiInputFromMoleculeHandle(Pointer hStatus, Pointer hMolecule, String moreOptions) {
+		Set<Pointer> setNoStereo = null;
+		Set<InchiAtom> setO = null;
+		if (moreOptions != null && moreOptions.toLowerCase(Locale.ROOT).indexOf("fixamide") >= 0) {
+			setNoStereo = new HashSet<>();
+			setO = new HashSet<>();
+		}
+		List<InchiAtom> atoms = new ArrayList<>();
+		List<InchiBond> bonds = new ArrayList<>();
+		InchiInput inchiInput = new InchiInput();
+		Map<Pointer, InchiAtom> mapNativeToJavaAtom = new HashMap<>();
+		nativeToJavaAtoms(hStatus, hMolecule, mapNativeToJavaAtom, atoms, setO);
+		nativeToJavaBonds(hStatus, hMolecule, mapNativeToJavaAtom, bonds, setO, setNoStereo);
+		for (int i = 0, n = atoms.size(); i < n; i++) {
+			inchiInput.addAtom(atoms.get(i));
+		}
+		for (int i = 0, n = bonds.size(); i < n; i++) {
+			inchiInput.addBond(bonds.get(i));
+		}
+		nativeToJavaStereos(hStatus, hMolecule, mapNativeToJavaAtom, inchiInput, setNoStereo);
+		checkStatus(hStatus);
+		return inchiInput;
+	}
+
 	private static void nativeToJavaAtoms(Pointer hStatus, Pointer hMolecule,
-			Map<Pointer, InchiAtom> mapNativeToJavaAtom, InchiInput inchiInput) {
+			Map<Pointer, InchiAtom> mapNativeToJavaAtom, List<InchiAtom> atoms, Set<InchiAtom> setO) {
 		int nAtoms = IXA.IXA_MOL_GetNumAtoms(hStatus, hMolecule);
 		for (int i = 0; i < nAtoms; i++) {
 			Pointer hAtom = IXA.IXA_MOL_GetAtomId(hStatus, hMolecule, i);
@@ -926,7 +1081,11 @@ public class InchiAPI {
 			double y = IXA.IXA_MOL_GetAtomY(hStatus, hMolecule, hAtom);
 			double z = IXA.IXA_MOL_GetAtomZ(hStatus, hMolecule, hAtom);
 			InchiAtom atom = new InchiAtom(elSymbol, x, y, z);
-			atom.setImplicitHydrogen(IXA.IXA_MOL_GetAtomHydrogens(hStatus, hMolecule, hAtom, 0));
+			int nh = IXA.IXA_MOL_GetAtomHydrogens(hStatus, hMolecule, hAtom, 0);
+			if (nh > 0)
+				atom.setImplicitHydrogen(nh);
+			if (setO != null && nh == 1 && "O".equals(elSymbol))
+				setO.add(atom);
 			atom.setImplicitProtium(IXA.IXA_MOL_GetAtomHydrogens(hStatus, hMolecule, hAtom, 1));
 			atom.setImplicitDeuterium(IXA.IXA_MOL_GetAtomHydrogens(hStatus, hMolecule, hAtom, 2));
 			atom.setImplicitTritium(IXA.IXA_MOL_GetAtomHydrogens(hStatus, hMolecule, hAtom, 3));
@@ -940,37 +1099,45 @@ public class InchiAPI {
 			atom.setIsotopicMass(isotopicMass);
 			atom.setRadical(InchiRadical.of((byte)IXA.IXA_MOL_GetAtomRadical(hStatus, hMolecule, hAtom)));
 			atom.setCharge(IXA.IXA_MOL_GetAtomCharge(hStatus, hMolecule, hAtom));
-			inchiInput.addAtom(atom);
+			atoms.add(atom);
 			mapNativeToJavaAtom.put((hAtom), atom);
 		}
 	}
 
 	private static void nativeToJavaBonds(Pointer hStatus, Pointer hMolecule,
-			Map<Pointer, InchiAtom> mapNativeToJavaAtom, InchiInput inchiInput) {
+			Map<Pointer, InchiAtom> mapNativeToJavaAtom, List<InchiBond> bonds, Set<InchiAtom> setO,
+			Set<Pointer> setNoStereo) {
 		int numBonds = IXA.IXA_MOL_GetNumBonds(hStatus, hMolecule);
+		Map<InchiAtom, Amide> mapNC = (setNoStereo == null ? null : new HashMap<>());
+		Map<InchiAtom, Amide> mapCO = (setNoStereo == null ? null : new HashMap<>());
 		for (int i = 0; i < numBonds; i++) {
 			Pointer hBond = IXA.IXA_MOL_GetBondId(hStatus, hMolecule, i);
-			InchiBondType bondType = InchiBondType.of((byte)IXA.IXA_MOL_GetBondType(hStatus, hMolecule, hBond));
+			InchiBondType bondType = InchiBondType.of((byte) IXA.IXA_MOL_GetBondType(hStatus, hMolecule, hBond));
 			Pointer a1 = IXA.IXA_MOL_GetBondAtom1(hStatus, hMolecule, hBond);
 			Pointer a2 = IXA.IXA_MOL_GetBondAtom2(hStatus, hMolecule, hBond);
 			// maybe?
-			InchiBondStereo bondStereo = InchiBondStereo.of((byte)IXA.IXA_MOL_GetBondWedge(hStatus, hMolecule, hBond, a1));
+			InchiBondStereo bondStereo = InchiBondStereo
+					.of((byte) IXA.IXA_MOL_GetBondWedge(hStatus, hMolecule, hBond, a1));
 			InchiAtom atom1 = mapNativeToJavaAtom.get(a1);
 			InchiAtom atom2 = mapNativeToJavaAtom.get(a2);
-			inchiInput.addBond(new InchiBond(atom1, atom2, bondType, bondStereo));
+			InchiBond b = new InchiBond(atom1, atom2, bondType, bondStereo);
+			if (setNoStereo != null) {
+				b = Amide.check(i, hBond, b, bonds, atom1, atom2, mapNC, mapCO, setO, setNoStereo);
+			}
+			bonds.add(b);
 		}
 	}
 
 	private static void nativeToJavaStereos(Pointer hStatus, Pointer hMolecule,
-			Map<Pointer, InchiAtom> mapNativeToJavaAtom, InchiInput inchiInput) {
+			Map<Pointer, InchiAtom> mapNativeToJavaAtom, InchiInput inchiInput, Set<Pointer> setNoStereo) {
 		int numStereo = IXA.IXA_MOL_GetNumStereos(hStatus, hMolecule);
 		for (int is = 0; is < numStereo; is++) {
 			InchiAtom[] atoms = new InchiAtom[4];
 			Pointer hStereo = IXA.IXA_MOL_GetStereoId(hStatus, hMolecule, is);
 			// idxToAtom will give null for -1 input (implicit hydrogen)
 			for (int i = 0; i < 4; i++) {
-				Pointer vertex = IXA.IXA_MOL_GetStereoVertex(hStatus, hMolecule, hStereo, i);
-				atoms[i] = mapNativeToJavaAtom.get(vertex);
+				Pointer vVertex = IXA.IXA_MOL_GetStereoVertex(hStatus, hMolecule, hStereo, i);
+				atoms[i] = mapNativeToJavaAtom.get(vVertex);
 				if (atoms[i] == null)
 					atoms[i] = InchiStereo.STEREO_IMPLICIT_H;
 			}
@@ -987,11 +1154,13 @@ public class InchiAPI {
 			case InchiLibrary.IXA_STEREO_TOPOLOGY.IXA_STEREO_TOPOLOGY_RECTANGLE:
 				stereoType = InchiStereoType.DoubleBond;
 				// or 2,3,4-cumulene, I think.
-				Pointer centralBond = IXA.IXA_MOL_GetStereoCentralBond(hStatus, hMolecule, hStereo);
-				Pointer internal1 = IXA.IXA_MOL_GetBondAtom1(hStatus, hMolecule, centralBond);
-				Pointer internal2 = IXA.IXA_MOL_GetBondAtom2(hStatus, hMolecule, centralBond);
-				atoms[1] = mapNativeToJavaAtom.get(internal1);
-				atoms[2] = mapNativeToJavaAtom.get(internal2);
+				Pointer vCentralBond = IXA.IXA_MOL_GetStereoCentralBond(hStatus, hMolecule, hStereo);
+				if (setNoStereo != null && setNoStereo.contains(vCentralBond))
+					continue;
+				Pointer vAtom1 = IXA.IXA_MOL_GetBondAtom1(hStatus, hMolecule, vCentralBond);
+				Pointer vAtom2 = IXA.IXA_MOL_GetBondAtom2(hStatus, hMolecule, vCentralBond);
+				atoms[1] = mapNativeToJavaAtom.get(vAtom1);
+				atoms[2] = mapNativeToJavaAtom.get(vAtom2);
 				break;
 			case InchiLibrary.IXA_STEREO_TOPOLOGY.IXA_STEREO_TOPOLOGY_ANTIRECTANGLE:
 				stereoType = InchiStereoType.Allene;
@@ -1000,8 +1169,12 @@ public class InchiAPI {
 			default:
 				return;
 			}
-			InchiStereoParity parity = InchiStereoParity.of((byte)IXA.IXA_MOL_GetStereoParity(hStatus, hMolecule, hStereo));
-			InchiAtom centralAtom = (hasCentralAtom ?  centralAtom = mapNativeToJavaAtom.get(IXA.IXA_MOL_GetStereoCentralAtom(hStatus, hMolecule, hStereo)) : null);
+			InchiStereoParity parity = InchiStereoParity
+					.of((byte) IXA.IXA_MOL_GetStereoParity(hStatus, hMolecule, hStereo));
+			InchiAtom centralAtom = (hasCentralAtom
+					? centralAtom = mapNativeToJavaAtom
+							.get(IXA.IXA_MOL_GetStereoCentralAtom(hStatus, hMolecule, hStereo))
+					: null);
 			inchiInput.addStereo(new InchiStereo(atoms, centralAtom, stereoType, parity));
 		}
 	}
@@ -1020,21 +1193,7 @@ public class InchiAPI {
 	 * @return Version number String
 	 */
 	public static String getInchiLibraryVersion() {
-		/**
-		 * needs implementation
-		 * 
-		 * @j2sNative
-		 * 
-		 * return null;
-		 * 
-		 */
-		try (InputStream is = JnaInchi.class.getResourceAsStream("jnainchi_build.props")) {
-			Properties props = new Properties();
-			props.load(is);
-			return props.getProperty("inchi_version");
-		} catch (Exception e) {
-			return null;
-		}
+		return getInChIVersion(false);
 	}
 
 	/**
@@ -1044,10 +1203,11 @@ public class InchiAPI {
 	 */
 	public static String getJnaInchiVersion() {
 		/**
-		 * not implemented;
+		 * not implemented, but can be used for initialization of InchiAPI class
 		 * 
 		 * @j2sNative
 		 */
+		{
 		try (InputStream is = JnaInchi.class.getResourceAsStream("jnainchi_build.props")) {
 			Properties props = new Properties();
 			props.load(is);
@@ -1055,6 +1215,158 @@ public class InchiAPI {
 		} catch (Exception e) {
 			return null;
 		}
+		}
+	}
+	
+	public static String getInChIVersion(boolean fullDescription) {
+		//return IXA.IXA_INCHIBUILDER_GetInChIVersion(fullDescription);
+		/**
+		 * temporary only
+		 * @j2sNative
+		 *  var module = J2S._module;
+		 * 	  var ptr = module.ccall("IXA_INCHIBUILDER_GetInChIVersion", "number", ["number"], [fullDescription]);
+	  		var ret = module.UTF8ToString(ptr);
+	        module._free(ptr);	
+		 *  return ret;
+		 */
+		{
+		
+		    try(InputStream is = InchiAPI.class.getResourceAsStream("jnainchi_build.props")) {
+		        Properties props = new Properties();
+		        props.load(is);
+		        return props.getProperty("inchi_version");
+		      }
+		      catch (Exception e) {
+		        return null;
+		      }
+		}
+	}
+
+	public static String getJSONFromInchiInput(InchiInput inchiInput) {
+		int na = inchiInput.getAtoms().size();
+		int nb = inchiInput.getBonds().size();
+		int ns = inchiInput.getStereos().size();
+		Map<InchiAtom, Integer> mapAtoms = new HashMap<>();
+		boolean haveXYZ = false;
+		for (int i = 0; i < na; i++) {
+			InchiAtom a = inchiInput.getAtom(i);
+			if (a.getX() != 0 || a.getY() != 0 || a.getZ() != 0) {
+				haveXYZ = true;
+				break;
+			}
+		}
+		String s = "{";
+		s += "\n\"atomCount\":" + na + ",\n";
+		s += "\"atoms\":[\n";
+		for (int i = 0; i < na; i++) {
+			InchiAtom a = inchiInput.getAtom(i);
+			mapAtoms.put(a, Integer.valueOf(i));
+			if (i > 0)
+				s += ",\n";
+			s += "{";
+			s += toJSONInt("index", Integer.valueOf(i), "");
+			s += toJSONNotNone("elname", a.getElName(), ",");
+			if (haveXYZ) {
+				s += toJSONDouble("x", a.getX(), ",");
+				s += toJSONDouble("y", a.getY(), ",");
+				s += toJSONDouble("z", a.getZ(), ",");
+			}
+			s += toJSONNotNone("radical", a.getRadical(), ",");
+			s += toJSONNonZero("charge", a.getCharge(), ",");
+			s += toJSONNonZero("isotopeMass", a.getIsotopicMass(), ",");
+			if (a.getImplicitHydrogen() > 0)
+				s += toJSONNonZero("implicitH", a.getImplicitHydrogen(), ",");
+			s += toJSONNonZero("implicitDeuterium", a.getImplicitDeuterium(), ",");
+			s += toJSONNonZero("implicitProtium", a.getImplicitProtium(), ",");
+			s += toJSONNonZero("implicitTritium", a.getImplicitTritium(), ",");
+			s += "}";
+		}
+		s += "\n],";
+		s += "\n\"bondCount\":" + nb + ",";
+		s += "\n\"bonds\":[\n";
+
+		for (int i = 0; i < nb; i++) {
+			if (i > 0)
+				s += ",\n";
+			s += "{";
+			InchiBond b = inchiInput.getBond(i);
+			s += toJSONInt("originAtom", mapAtoms.get(b.getStart()).intValue(), "");
+			s += toJSONInt("targetAtom", mapAtoms.get(b.getEnd()).intValue(), ",");
+			String bt = b.getType().toString().toUpperCase(Locale.ROOT);
+			if (!bt.equals("SINGLE"))
+				s += toJSONString("type", bt, ",");
+			s += toJSONNotNone("stereo", b.getStereo().toString().toUpperCase(Locale.ROOT), ",");
+			s += "}";
+		}
+		s += "\n]";
+		if (ns > 0) {
+			s += ",\n\"stereoCount\":" + ns + ",\n";
+			s += "\"stereo\":[\n";
+			for (int i = 0; i < ns; i++) {
+				if (i > 0)
+					s += ",\n";
+				s += "{";
+				InchiStereo d = inchiInput.getStereos().get(i);
+				InchiAtom a = d.getCentralAtom();
+				s += toJSONNotNone("parity", d.getParity(), "");
+				s += toJSONNotNone("type", d.getType(), ",");
+				if (a != null)
+					s += toJSONInt("centralAtom", mapAtoms.get(a).intValue(), ",");
+				// s += toJSON("debugString",d.getDebugString(), ",");
+				// never implemented? s +=
+				// toJSON("disconnectedParity",d.getDisconnectedParity(), ",");
+				InchiAtom[] an = d.getAtoms();
+				int[] nbs = new int[an.length];
+				for (int j = 0; j < an.length; j++) {
+					nbs[j] = mapAtoms.get(an[j]).intValue();
+				}
+				s += toJSONArray("neighbors", nbs, ",");
+				s += "}";
+			}
+			s += "\n]";
+		}
+		s += "}";
+		return s;
+	}
+
+	private static String toJSONArray(String key, int[] val, String term) {
+		String s = term + "\"" + key + "\":[" + val[0];
+		for (int i = 1; i < val.length; i++) {
+			s += "," + val[i];
+		}
+		return s + "]";
+	}
+
+	private static String toJSONNonZero(String key, int val, String term) {
+		return (val == 0 ? "" : toJSONInt(key, val, term));
+	}
+
+	private static String toJSONInt(String key, int val, String term) {
+		return term + "\"" + key + "\":" + val;
+	}
+
+	private static String toJSONDouble(String key, double val, String term) {
+		String s;
+		if (val == 0) {
+			s = "0";
+		} else {
+			s = "" + (val + (val > 0 ? 0.00000001 : -0.00000001));
+			s = s.substring(0, s.indexOf(".") + 5);
+			int n = s.length();
+			while (s.charAt(--n) == '0') {
+			}
+			s = s.substring(0, n + 1);
+		}
+		return term + "\"" + key + "\":" + s;
+	}
+
+	private static String toJSONString(String key, String val, String term) {
+		return term + "\"" + key + "\":\"" + val + "\"";
+	}
+
+	private static String toJSONNotNone(String key, Object val, String term) {
+		String s = val.toString();
+		return ("NONE".equals(s) ? "" : term + "\"" + key + "\":\"" + s + "\"");
 	}
 
 }
