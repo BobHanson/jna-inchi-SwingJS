@@ -9,6 +9,8 @@
 	   
    <target name="toJs" id="toJs">
   			
+    <!-- transfer resources -->
+
    	<!-- make core files -->
 
    	<echo>creating ${dist.dir}/${project}.zip</echo>
@@ -21,27 +23,5 @@
   </target>
 
 
-	  <target name="call-core" id="call-core">
-	   	<echo>......Creating core${call-core.name}.js</echo>
-	   	<concat destfile="${site.path}/js/core/tmp.js">
-	   		<filelist dir="${site.path}/j2s" files="${call-core.list}" />
-	   	</concat> 
-
-	  	<replace dir="${site.path}/js/core" includes="tmp.js" token="Clazz." value="Clazz_"/>
-	  	<replace dir="${site.path}/js/core" includes="tmp.js" token="Clazz__" value="Clazz._"/>
-	   	<echo>......Generating ${site.path}/j2s/core/core${call-core.name}.js</echo> 	
-	   	<concat destfile="${site.path}/j2s/core/core${call-core.name}.js"><filelist dir="${site.path}/js" files="
-	   		core/coretop2.js
-	   		core/tmp.js
-	   		core/corebottom2.js
-	   		" />
-	   	</concat>
-	   	<echo>......Generating ${site.path}/j2s/core/core${call-core.name}.z.js</echo> 	
-	   	<java jar="swingjs/tools/closure_compiler.jar" fork="true" dir="${site.path}/j2s/core" failonerror="false">
-	   		<arg line="--js core${call-core.name}.js --js_output_file core${call-core.name}.z.js" />
-	    </java>
-	 	<delete quiet="true" file="${site.path}/js/core/tmp.js" />
-	  	
-	  </target>
 	
 </project>
