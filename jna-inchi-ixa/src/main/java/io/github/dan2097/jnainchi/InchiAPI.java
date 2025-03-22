@@ -538,15 +538,15 @@ public class InchiAPI {
 			}
 			for (InchiFlag flag : options.getFlags()) {
 				switch (flag) {
-				case AuxNone:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
-							InchiLibrary.IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_AuxNone, true);
-					break;
 				case ChiralFlagOFF:
 					IXA.IXA_MOL_SetChiral(hStatus, hMolecule, false);
 					break;
 				case ChiralFlagON:
 					IXA.IXA_MOL_SetChiral(hStatus, hMolecule, true);
+					break;
+				case AuxNone:
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
+							InchiLibrary.IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_AuxNone, true);
 					break;
 				case DoNotAddH:
 					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
