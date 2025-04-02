@@ -31,6 +31,7 @@ import java.util.Set;
 import com.sun.jna.Platform;
 import com.sun.jna.Pointer;
 
+import io.github.dan2097.jnainchi.InchiOptions.InchiOptionsBuilder;
 import io.github.dan2097.jnainchi.inchi.IXA;
 import io.github.dan2097.jnainchi.inchi.InchiLibrary;
 import io.github.dan2097.jnainchi.inchi.InchiLibrary.IXA_BOND_WEDGE;
@@ -64,22 +65,20 @@ import io.github.dan2097.jnainchi.inchi.InchiLibrary.IXA_INCHIBUILDER_STEREOOPTI
  * com.sun.jna.Pointer for these here. This does not detract at all from the
  * functionality and (I think) makes the code a bit more readable.
  * <p>
- * You might notice that in this class there is no run-time reference to
- * com.sun.jna. (Pointer references are only at compile time; the only reference
- * is a compile-time final static String providing the name of the architecture.
- * No references at all to com.sun.jna.Pointer, Structure, or Library. Just a
+ * You might notice that in this class there is only run-time reference to
+ * com.sun.jna.Pointer. No references at all to com.sun.jna.Structure, or Library, and just a
  * passing reference to com.sun.jna.Platform. Instead, all the pointers are
  * simply left as Pointer. This greatly simplifies the function signatures in
- * JavaScript and should note be any particular issue in Java, either. The
+ * JavaScript and should not be any particular issue in Java, either. The
  * pointers are only used fleetingly to get an atom ID, for example, so that it
- * can be passed back to another IXA function.
+ * can be passed back to another IXA method.
  * <p>
  * This is in contrast to the original JNA-InChI, which generates template Java
  * classes from C strutures and then populates them on the fly. This is not
  * something that is available in WASM. (Not that it is impossible, but you
  * really do not want to mess with converting structures in C to anything in
  * Java or JavaScript. If you want to see how involved this is, take a peek at
- * com.sun.jna.Structure.java .)
+ * com.sun.jna.Structure.java.)
  * <p>
  * The following libinchi methods that don't start with "IXA_" but are still
  * part of this package because they are JavaScript-safe include:
@@ -126,6 +125,7 @@ STDINCHIGEN_Setup
  * @author Bob Hanson
  *
  */
+@SuppressWarnings("boxing")
 public class InchiAPI {
 
 	private static boolean isJS = (/** @j2sNative true || */
@@ -170,7 +170,7 @@ public class InchiAPI {
        if (J2S.wasm && J2S.wasm[wasmName] && J2S.wasm[wasmName].$ready) {
          t[0] && clearInterval(t[0]);
          System.out.println("InChI WASM initialized successfully");
-         r.run$();
+         r && r.run$();
          return true;
        } 
        System.out.println("InChI WASM initializing...");
@@ -179,7 +179,8 @@ public class InchiAPI {
    t[0] = setInterval(f, 50);
 		 */ {
 			 // in Java, no asynchronous issue
-			 r.run();
+			 if (r != null)
+				 r.run();
 		 }
 	}
 
@@ -324,6 +325,25 @@ public class InchiAPI {
 		aveMass.put("Lv", 293);
 		aveMass.put("Ts", 297);
 		aveMass.put("Og", 294);
+	}
+
+	public static String getInChIFromInchiInput(InchiInput inchiInput, String options) {
+		return toInchi(inchiInput, parseOptions(options)).getInchi();
+	}
+	public static InchiOptions parseOptions(String options) {
+		if (options == null)
+			return null;
+		InchiOptionsBuilder builder = new InchiOptions.InchiOptionsBuilder();
+		String[] s = options.split("\\s");
+		for (int i = 0; i < s.length; i++) {
+			InchiFlag flag = InchiFlag.getFlagFromName(s[i]);
+			if (flag == null) {
+				System.err.println("InchiAPI unrecognized flag " + s[i]);
+			} else {
+				builder.withFlag(flag);
+			}	
+		}
+		return builder.build();
 	}
 
 	public static InchiOutput toInchi(InchiInput inchiInput) {
@@ -538,15 +558,15 @@ public class InchiAPI {
 			}
 			for (InchiFlag flag : options.getFlags()) {
 				switch (flag) {
+				case AuxNone:
+					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
+							InchiLibrary.IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_AuxNone, true);
+					break;
 				case ChiralFlagOFF:
 					IXA.IXA_MOL_SetChiral(hStatus, hMolecule, false);
 					break;
 				case ChiralFlagON:
 					IXA.IXA_MOL_SetChiral(hStatus, hMolecule, true);
-					break;
-				case AuxNone:
-					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
-							InchiLibrary.IXA_INCHIBUILDER_OPTION.IXA_INCHIBUILDER_OPTION_AuxNone, true);
 					break;
 				case DoNotAddH:
 					IXA.IXA_INCHIBUILDER_SetOption(hStatus, hBuilder,
@@ -728,13 +748,13 @@ public class InchiAPI {
 		return getInchiInputFromMolFile(molText, null);
 	}
 	
-	public static InchiInput getInchiInputFromMolFile(String molText, String moreOptions) {
+	public static InchiInput getInchiInputFromMolFile(String molText, String outputOptions) {
 	    checkLibrary();
 		Pointer hStatus = IXA.IXA_STATUS_Create();
 		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);
 		try {
 			IXA.IXA_MOL_ReadMolfile(hStatus, hMolecule, molText);
-			return getInchiInputFromMoleculeHandle(hStatus, hMolecule, moreOptions);
+			return getInchiInputFromMoleculeHandle(hStatus, hMolecule, outputOptions);
 		} finally {
 			IXA.IXA_MOL_Destroy(hStatus, hMolecule);
 			IXA.IXA_STATUS_Destroy(hStatus);
@@ -764,6 +784,16 @@ public class InchiAPI {
 			IXA.IXA_MOL_Destroy(hStatus, hMolecule);
 			IXA.IXA_STATUS_Destroy(hStatus);
 		}
+	}
+
+	/**
+	 * Simple string return with no InchiKeyOutput structure.
+	 * 
+	 * @param inchi
+	 * @return
+	 */
+	public static String getInChIKeyFromInChI(String inchi) {
+		return inchiToInchiKeyIXA(inchi).getInchiKey();		
 	}
 
 	/**
@@ -890,19 +920,38 @@ public class InchiAPI {
 //    }
 //  }
 
+	/**
+	 * nonstandard "Inchi" instead of "InChI" here; adds no ouput options
+	 * @param inchi
+	 * @return
+	 */
 	public static InchiInputFromInchiOutput getInchiInputFromInchi(String inchi) {
-		return getInchiInputFromInchi(inchi, InchiOptions.DEFAULT_OPTIONS);
+		return getInchiInputFromInchi(inchi, InchiOptions.DEFAULT_OPTIONS, null);
 	}
 
-	public static InchiInputFromInchiOutput getInchiInputFromInchi(String inchi, String moreOptions) {
-		return getInchiInputFromInchi(inchi, InchiOptions.DEFAULT_OPTIONS, moreOptions);
+	/**
+	 * 
+	 * @param inchi
+	 * @param outputOptions "fixamide" and or "fixacid"
+	 * @return
+	 */
+	public static InchiInput getInchiInputFromInChI(String inchi, String outputOptions) {
+		return getInchiInputFromInchi(inchi, InchiOptions.DEFAULT_OPTIONS, outputOptions).getInchiInput();
 	}
 
+	/**
+	 * This is just here to match JniInchi. Most of the time we do not need the 
+	 * full Output structure. 
+	 * 
+	 * @param inchi
+	 * @param options
+	 * @return
+	 */
 	public static InchiInputFromInchiOutput getInchiInputFromInchi(String inchi, InchiOptions options) {
 		return getInchiInputFromInchi(inchi, options, null);
 	}
 	
-	public static InchiInputFromInchiOutput getInchiInputFromInchi(String inchi, InchiOptions options, String moreOptions) {
+	private static InchiInputFromInchiOutput getInchiInputFromInchi(String inchi, InchiOptions options, String outputOptions) {
 		checkLibrary();
 		Pointer hStatus = IXA.IXA_STATUS_Create();
 		Pointer hMolecule = IXA.IXA_MOL_Create(hStatus);
@@ -913,7 +962,7 @@ public class InchiAPI {
 			// output));
 			// but here we call IXA_MOL_ReadInChI, which just sets options to ""
 			IXA.IXA_MOL_ReadInChI(hStatus, hMolecule, inchi);
-			InchiInput inchiInput = getInchiInputFromMoleculeHandle(hStatus, hMolecule, moreOptions);
+			InchiInput inchiInput = getInchiInputFromMoleculeHandle(hStatus, hMolecule, outputOptions);
 			String message = getMessages(hStatus);
 			// getStructureFromINCHI generates an output
 			// but IXA_MOL_ReadInChI ignores output.WarningFlags.
@@ -954,6 +1003,12 @@ public class InchiAPI {
 		}
 	}
 
+	/**
+	 * Preserve information necessary to switch N=C-OH to HN-C=O.
+	 * 
+	 * @author Bob Hanson
+	 *
+	 */
 	private static class Amide {
 		InchiAtom aN, aC, aO;
 		InchiBond bNC, bCO;
@@ -978,88 +1033,252 @@ public class InchiAPI {
 			}
 		}
 
-		static InchiBond check(int i, Pointer hBond, InchiBond b, List<InchiBond> bonds, 
-				InchiAtom atom1, InchiAtom atom2,
-				Map<InchiAtom, Amide> mapNC, Map<InchiAtom, Amide> mapCO, Set<InchiAtom> setO, Set<Pointer> setNoStereo) {
+		static void check(int i, Pointer hBond, InchiBond b, List<InchiBond> bonds, InchiAtom atom1, InchiAtom atom2,
+				Map<InchiAtom, Amide> mapNC, Map<InchiAtom, Amide> mapCO, Set<InchiAtom> setO, Set<Pointer> setNoStereo,
+				List<Amide> amides) {
 			String n1 = atom1.getElName();
 			String n2 = atom2.getElName();
-			if (b.getType() == InchiBondType.DOUBLE) {
-				if (n1.equals("N") && n2.equals("C")) {
-					Amide a = mapCO.get(atom2);						
+			Amide newAmide = null;
+			switch (b.getType()) {
+			case SINGLE:
+				if (n1.equals("C") && n2.equals("O") && setO.contains(atom2)) {
+					Amide a = mapNC.get(atom1);
 					if (a == null) {
-						mapNC.put(atom2, new Amide(hBond, i, b, atom1, atom2, false));
+						mapCO.put(atom1, newAmide = new Amide(null, i, b, atom1, atom2, false));
+					} else {
+						a.addO(i, b, atom2, bonds);
+					}
+				} else if (n2.equals("C") && n1.equals("O") && setO.contains(atom1)) {
+					Amide a = mapNC.get(atom2);
+					if (a == null) {
+						mapCO.put(atom1, newAmide = new Amide(null, i, b, atom2, atom1, true));
+					} else {
+						setNoStereo.add(a.hNC);
+						a.addO(i, b, atom1, bonds);
+					}
+				}
+				break;
+			case DOUBLE:
+				if (n1.equals("N") && n2.equals("C")) {
+					Amide a = mapCO.get(atom2);
+					if (a == null) {
+						mapNC.put(atom2, newAmide = new Amide(hBond, i, b, atom1, atom2, false));
 					} else {
 						setNoStereo.add(hBond);
-						b = a.addN(b, atom1, bonds);
+						a.addN(i, b, atom1, bonds);
 					}
-				} else if(n2.equals("N") && n1.equals("C")) {
-					Amide a = mapCO.get(atom1);						
+				} else if (n2.equals("N") && n1.equals("C")) {
+					Amide a = mapCO.get(atom1);
 					if (a == null) {
-						mapNC.put(atom1, new Amide(hBond, i, b, atom2, atom1, true));
+						mapNC.put(atom1, newAmide = new Amide(hBond, i, b, atom2, atom1, true));
 					} else {
-						b = a.addN(b, atom1, bonds);
+						a.addN(i, b, atom2, bonds);
 						setNoStereo.add(hBond);
 					}
 				}
-			} else if (b.getType() == InchiBondType.SINGLE) {
-				if (n1.equals("C") && n2.equals("O") && setO.contains(atom2)) {
-					Amide a = mapNC.get(atom1);						
-					if (a == null) {
-						mapCO.put(atom1, new Amide(null, i, b, atom1, atom2, false));
-					} else {
-						b = a.addO(b, atom2, bonds);
-					}
-				} else if(n2.equals("C") && n1.equals("O") && setO.contains(atom1)) {
-					Amide a = mapNC.get(atom2);						
-					if (a == null) {
-						mapCO.put(atom1, new Amide(null, i, b, atom2, atom1, true));
-					} else {
-						setNoStereo.add(a.hNC);
-						b = a.addO(b, atom1, bonds);
-					}
-				}					
+				break;
+			default:
+				break;
 			}
-			return b;
+			if (newAmide != null)
+				amides.add(newAmide);
 		}
 
-		private InchiBond addN(InchiBond b, InchiAtom n, List<InchiBond> bonds) {
+		private void addN(int index, InchiBond b, InchiAtom n, List<InchiBond> bonds) {
 			bNC = b;
 			aN = n;
-			fix();
-			bonds.set(iCO, bCO);
-			return bNC;
+			iNC = index;
+//			fix();
+//			bonds.set(iCO, bCO);
 		}
 		
-		private InchiBond addO(InchiBond b, InchiAtom o, List<InchiBond> bonds) {
+		private void addO(int index, InchiBond b, InchiAtom o, List<InchiBond> bonds) {
 			bCO = b;
 			aO = o;
-			fix();
-			bonds.set(iNC, bNC);
-			return bCO;
+			iCO = index;
+//			fix();
+//			bonds.set(iNC, bNC);
 		}
 
-		private void fix() {
-			bNC = new InchiBond(revNC ? aC : aN, revNC ? aN : aC, InchiBondType.SINGLE);
-			bCO = new InchiBond(revCO ? aO : aC, revCO ? aC : aO, InchiBondType.DOUBLE);
-			aN.setImplicitHydrogen(aN.getImplicitHydrogen() + 1);
-			aO.setImplicitHydrogen(0);
+		private void fixAmide(List<InchiBond> bonds) {
+			if (aO == null || aN == null)
+				return;
+			char htype = Acid.getImplicitHtype(aO);
+			if (htype != '\0') {
+				bNC = new InchiBond(revNC ? aC : aN, revNC ? aN : aC, InchiBondType.SINGLE);
+				bCO = new InchiBond(revCO ? aO : aC, revCO ? aC : aO, InchiBondType.DOUBLE);
+				bonds.set(iNC, bNC);
+				bonds.set(iCO, bCO);
+				switch (htype) {
+				case 'H':
+					int n = aN.getImplicitHydrogen();
+					aN.setImplicitHydrogen(n == -1 ? -1 : n + 1);
+					aO.setImplicitHydrogen(0);
+					break;
+				case 'D':
+					aN.setImplicitDeuterium(aN.getImplicitDeuterium() + 1);
+					aO.setImplicitDeuterium(0);
+					break;
+				case 'T':
+					aN.setImplicitTritium(aN.getImplicitTritium() + 1);
+					aO.setImplicitTritium(0);
+					break;
+				case 'P':
+					aN.setImplicitProtium(aN.getImplicitProtium() + 1);
+					aO.setImplicitProtium(0);
+					break;
+				}
+			}
+		}
+
+		protected static void fix(List<Amide> amides, List<InchiBond> bonds) {
+			for (int i = amides.size(); --i >= 0;) {
+				amides.get(i).fixAmide(bonds);
+			}
+		}
+	}
+
+	
+	/**
+	 * Preserve information necessary to switch PhO(-)/CO2H to PhOH/CO2(-).
+	 * 
+	 * @author Bob Hanson
+	 *
+	 */
+	private static class Acid {
+		InchiAtom aC, aO1, aO2;
+		int charge;
+		char htype = '\0';
+
+		public static void check(InchiAtom atom1, InchiAtom atom2, InchiBondType type, Map<InchiAtom, Acid> acids) {
+			if (atom1.getElName().equals("C") && atom2.getElName().equals("O")) {
+				addCO(acids, atom1, atom2, type);
+			} else if (atom1.getElName().equals("O") && atom2.getElName().equals("C")) {
+				addCO(acids, atom2, atom1, type);
+			}
+		}
+
+		static void addCO(Map<InchiAtom, Acid> acids, InchiAtom aC, InchiAtom aO, InchiBondType type) {
+			switch (type) {
+			case SINGLE:
+			case DOUBLE:
+				if (aO.getCharge() != 0 && aO.getCharge() != -1) {
+					return;
+				}
+				break;
+		    default:
+		    	return;
+			}
+			Acid a = acids.get(aC);
+			if (a == null) 
+				acids.put(aC, a = new Acid(aC, aO, type));
+			else
+				a.addO(aO, type);
+
+		}
+
+		Acid(InchiAtom aC, InchiAtom aO, InchiBondType type) {
+			this.aC = aC;
+			addO(aO, type);
+		}
+
+		private void addO(InchiAtom aO, InchiBondType type) {
+			switch (type) {
+			case SINGLE:
+				aO1 = aO;
+				charge = aO.getCharge();
+				if (charge == 0) {
+					htype = getImplicitHtype(aO);
+				}
+		    	break;
+			case DOUBLE:
+				aO2 = aO;
+				break;
+		    default:
+		    	aC = null;
+		    	break;				
+			}
+		}
+
+		private static char getImplicitHtype(InchiAtom aO) {
+			if (aO.getImplicitHydrogen() == 1)
+				return 'H';
+			else if (aO.getImplicitProtium() == 1)
+				return 'P';
+			else if (aO.getImplicitDeuterium() == 1)
+				return 'D';
+			else if (aO.getImplicitTritium() == 1)
+				return 'T';
+			return '\0';
+		}
+
+		static void fix(Map<InchiAtom, Acid> acids) {
+			Acid phenolate = null, carboxylic = null;
+			out: for (Acid a : acids.values()) {
+				if (a.aC == null)
+					continue;
+				switch (a.charge) {
+				case 0:
+					if (a.aO2 != null && a.htype != '\0') {
+						carboxylic = a;
+						if (phenolate != null)
+							break out;
+					}
+					break;
+				case -1:
+					if (a.aO2 == null) {
+						phenolate = a;
+						if (carboxylic != null)
+							break out;
+					}
+					break;
+				}
+			}
+			if (carboxylic == null || phenolate == null)
+				return;	
+			carboxylic.aO1.setCharge(-1);
+			phenolate.aO1.setCharge(0);
+			switch (carboxylic.htype) {
+			case 'H':
+				carboxylic.aO1.setImplicitHydrogen(0);
+				phenolate.aO1.setImplicitHydrogen(1);
+				break;
+			case 'D':
+				carboxylic.aO1.setImplicitDeuterium(0);
+				phenolate.aO1.setImplicitDeuterium(1);
+				break;
+			case 'T':
+				carboxylic.aO1.setImplicitTritium(0);
+				phenolate.aO1.setImplicitTritium(1);
+				break;
+			case 'P':
+				carboxylic.aO1.setImplicitProtium(0);
+				phenolate.aO1.setImplicitProtium(1);
+				break;
+			}
 		}
 
 	}
-	
-	public static InchiInput getInchiInputFromMoleculeHandle(Pointer hStatus, Pointer hMolecule, String moreOptions) {
+
+	public static InchiInput getInchiInputFromMoleculeHandle(Pointer hStatus, Pointer hMolecule, String outputOptions) {
 		Set<Pointer> setNoStereo = null;
 		Set<InchiAtom> setO = null;
-		if (moreOptions != null && moreOptions.toLowerCase(Locale.ROOT).indexOf("fixamide") >= 0) {
+		Map<InchiAtom, Acid> acids = null;
+		List<Amide> amides = null;
+		if (outputOptions != null && outputOptions.toLowerCase(Locale.ROOT).indexOf("fixamide") >= 0) {
 			setNoStereo = new HashSet<>();
 			setO = new HashSet<>();
+			amides = new ArrayList<>();
+		}
+		if (outputOptions != null && outputOptions.toLowerCase(Locale.ROOT).indexOf("fixacid") >= 0) {
+			acids = new HashMap<>();
 		}
 		List<InchiAtom> atoms = new ArrayList<>();
 		List<InchiBond> bonds = new ArrayList<>();
 		InchiInput inchiInput = new InchiInput();
 		Map<Pointer, InchiAtom> mapNativeToJavaAtom = new HashMap<>();
 		nativeToJavaAtoms(hStatus, hMolecule, mapNativeToJavaAtom, atoms, setO);
-		nativeToJavaBonds(hStatus, hMolecule, mapNativeToJavaAtom, bonds, setO, setNoStereo);
+		nativeToJavaBonds(hStatus, hMolecule, mapNativeToJavaAtom, bonds, setO, setNoStereo, acids, amides);
 		for (int i = 0, n = atoms.size(); i < n; i++) {
 			inchiInput.addAtom(atoms.get(i));
 		}
@@ -1077,14 +1296,14 @@ public class InchiAPI {
 		for (int i = 0; i < nAtoms; i++) {
 			Pointer hAtom = IXA.IXA_MOL_GetAtomId(hStatus, hMolecule, i);
 			String elSymbol = IXA.IXA_MOL_GetAtomElement(hStatus, hMolecule, hAtom);
+			int charge = IXA.IXA_MOL_GetAtomCharge(hStatus, hMolecule, hAtom);
 			double x = IXA.IXA_MOL_GetAtomX(hStatus, hMolecule, hAtom);
 			double y = IXA.IXA_MOL_GetAtomY(hStatus, hMolecule, hAtom);
 			double z = IXA.IXA_MOL_GetAtomZ(hStatus, hMolecule, hAtom);
 			InchiAtom atom = new InchiAtom(elSymbol, x, y, z);
 			int nh = IXA.IXA_MOL_GetAtomHydrogens(hStatus, hMolecule, hAtom, 0);
-			if (nh > 0)
-				atom.setImplicitHydrogen(nh);
-			if (setO != null && nh == 1 && "O".equals(elSymbol))
+			atom.setImplicitHydrogen(nh); // may be -1 from mol file "determine from valence"
+			if (setO != null && charge == 0 && "O".equals(elSymbol) && (nh == 1 || nh == -1 && IXA.IXA_MOL_GetAtomNumBonds(hStatus, hMolecule, hAtom) == 1))
 				setO.add(atom);
 			atom.setImplicitProtium(IXA.IXA_MOL_GetAtomHydrogens(hStatus, hMolecule, hAtom, 1));
 			atom.setImplicitDeuterium(IXA.IXA_MOL_GetAtomHydrogens(hStatus, hMolecule, hAtom, 2));
@@ -1097,8 +1316,8 @@ public class InchiAPI {
 				isotopicMass = baseMass + delta;
 			}
 			atom.setIsotopicMass(isotopicMass);
+			atom.setCharge(charge);
 			atom.setRadical(InchiRadical.of((byte)IXA.IXA_MOL_GetAtomRadical(hStatus, hMolecule, hAtom)));
-			atom.setCharge(IXA.IXA_MOL_GetAtomCharge(hStatus, hMolecule, hAtom));
 			atoms.add(atom);
 			mapNativeToJavaAtom.put((hAtom), atom);
 		}
@@ -1106,7 +1325,7 @@ public class InchiAPI {
 
 	private static void nativeToJavaBonds(Pointer hStatus, Pointer hMolecule,
 			Map<Pointer, InchiAtom> mapNativeToJavaAtom, List<InchiBond> bonds, Set<InchiAtom> setO,
-			Set<Pointer> setNoStereo) {
+			Set<Pointer> setNoStereo, Map<InchiAtom, Acid> acids, List<Amide> amides) {
 		int numBonds = IXA.IXA_MOL_GetNumBonds(hStatus, hMolecule);
 		Map<InchiAtom, Amide> mapNC = (setNoStereo == null ? null : new HashMap<>());
 		Map<InchiAtom, Amide> mapCO = (setNoStereo == null ? null : new HashMap<>());
@@ -1115,16 +1334,49 @@ public class InchiAPI {
 			InchiBondType bondType = InchiBondType.of((byte) IXA.IXA_MOL_GetBondType(hStatus, hMolecule, hBond));
 			Pointer a1 = IXA.IXA_MOL_GetBondAtom1(hStatus, hMolecule, hBond);
 			Pointer a2 = IXA.IXA_MOL_GetBondAtom2(hStatus, hMolecule, hBond);
-			// maybe?
-			InchiBondStereo bondStereo = InchiBondStereo
-					.of((byte) IXA.IXA_MOL_GetBondWedge(hStatus, hMolecule, hBond, a1));
+			InchiBondStereo bondStereo = getSingleStereoCode(
+					IXA.IXA_MOL_GetBondWedge(hStatus, hMolecule, hBond, a1), 
+					IXA.IXA_MOL_GetBondWedge(hStatus, hMolecule, hBond, a2));
 			InchiAtom atom1 = mapNativeToJavaAtom.get(a1);
 			InchiAtom atom2 = mapNativeToJavaAtom.get(a2);
 			InchiBond b = new InchiBond(atom1, atom2, bondType, bondStereo);
-			if (setNoStereo != null) {
-				b = Amide.check(i, hBond, b, bonds, atom1, atom2, mapNC, mapCO, setO, setNoStereo);
+			if (amides != null) {
+				Amide.check(i, hBond, b, bonds, atom1, atom2, mapNC, mapCO, setO, setNoStereo, amides);
+			}
+			if (acids != null) {
+				Acid.check(atom1, atom2, bondType, acids);
 			}
 			bonds.add(b);
+		}
+		if (acids != null && acids.size() > 0)
+			Acid.fix(acids);
+		if (amides != null && amides.size() > 0)
+			Amide.fix(amides, bonds);
+	}
+
+	private static InchiBondStereo getSingleStereoCode(int direction, int reverse_direction) {
+		switch (direction) {
+		case IXA_BOND_WEDGE.IXA_BOND_WEDGE_NONE:
+			switch (reverse_direction) {
+			case IXA_BOND_WEDGE.IXA_BOND_WEDGE_NONE:
+				return InchiBondStereo.NONE;
+			case IXA_BOND_WEDGE.IXA_BOND_WEDGE_UP:
+				return InchiBondStereo.SINGLE_2UP;
+			case IXA_BOND_WEDGE.IXA_BOND_WEDGE_DOWN:
+				return InchiBondStereo.SINGLE_2DOWN;
+			case IXA_BOND_WEDGE.IXA_BOND_WEDGE_EITHER:
+				return InchiBondStereo.SINGLE_2EITHER;
+			default:
+				return InchiBondStereo.NONE;
+			}
+		case IXA_BOND_WEDGE.IXA_BOND_WEDGE_UP:
+			return InchiBondStereo.SINGLE_1UP;
+		case IXA_BOND_WEDGE.IXA_BOND_WEDGE_DOWN:
+			return InchiBondStereo.SINGLE_1DOWN;
+		case IXA_BOND_WEDGE.IXA_BOND_WEDGE_EITHER:
+			return InchiBondStereo.SINGLE_1EITHER;
+		default:
+			return InchiBondStereo.NONE;
 		}
 	}
 
@@ -1368,5 +1620,10 @@ public class InchiAPI {
 		String s = val.toString();
 		return ("NONE".equals(s) ? "" : term + "\"" + key + "\":\"" + s + "\"");
 	}
+
+	public static int getCallCount() {
+		return IXA.ncalls;
+	}
+
 
 }
