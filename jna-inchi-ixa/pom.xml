@@ -13,6 +13,10 @@
       <groupId>io.github.dan2097</groupId>
       <artifactId>jna-inchi-api</artifactId>
     </dependency>
- </dependencies>
+    <dependency>
+      <groupId>net.java.dev.jna</groupId>
+      <artifactId>jna</artifactId>
+    </dependency>
+  </dependencies>
   
 </project>
